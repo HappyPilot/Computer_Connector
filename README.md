@@ -118,7 +118,19 @@ https://your-machine.your-tailnet.ts.net/rdc/mcp
 
 ### ChatGPT rebuild handoff rule
 
-When the ChatGPT WCM registration needs to be rebuilt, provide the current public MCP resource from `RDC_RESOURCE` and the following absolute-path PowerShell command so the user can print the current WCM key and URL locally:
+When the ChatGPT WCM registration needs to be rebuilt, the model should **proactively** tell the user that a rebuild/reconnect is required and immediately provide the current public MCP resource from `RDC_RESOURCE` plus the following absolute-path PowerShell command so the user can print the current WCM key and URL locally. Do not wait for the user to ask for the key command again.
+
+This proactive handoff is required whenever any of these conditions is observed:
+
+- the live Router `tools/list` differs from the tool schema visible to the current ChatGPT session;
+- Router-local tools were added, removed, or renamed;
+- routed Desktop Commander tool schemas changed, including WCM-only fields such as `approval_id`;
+- the current ChatGPT session still exposes retired tool names or is missing newly verified live tools;
+- a deployment/restart completed successfully but the ChatGPT-side plugin registration is still using a stale discovery snapshot.
+
+The handoff message should state that rebuilding/reconnecting the WCM plugin refreshes `initialize + tools/list`, and should recommend opening a new chat after the rebuild when the current conversation may retain an old tool snapshot. It should also give a concrete validation target instead of only saying "rebuild the plugin". For the current approval design, a healthy refreshed schema should expose `approval_status`, `request_approval`, and `resolve_pending_action`; real routed Desktop Commander tools such as `get_config` and `start_process` should expose optional `approval_id`; retired compatibility names must not remain visible.
+
+Use this command verbatim when handing off the rebuild credentials:
 
 ```powershell
 $wcmKey = (Get-Content -LiteralPath 'C:\Users\Songjx\Documents\ChatGPT\windows-console-mcp\.state\rdc-approval-secret.txt' -Raw).Trim()
@@ -126,6 +138,8 @@ $wcmUrl = ((Get-Content -LiteralPath 'C:\Users\Songjx\Documents\ChatGPT\windows-
 Write-Output ("WCM key: " + $wcmKey)
 Write-Output ("WCM URL: " + $wcmUrl)
 ```
+
+The model should send the command, not the secret value itself. The user runs it locally and uses the printed key/URL while rebuilding the ChatGPT WCM registration.
 
 ## Troubleshooting
 
