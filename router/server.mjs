@@ -464,10 +464,10 @@ function approvalIdStatusValue(approvalId) {
   else if (request?.state === 'pending') classification = 'approval_id_pending_unbound';
   else if (request?.state) classification = 'approval_id_' + request.state;
   const output = grantActive
-    ? 'This approval_id has an active timed full-WCM grant. Use call_with_approval to make authorized worker calls.'
+    ? 'This approval_id has an active timed full-WCM grant. Pass it directly on routed WCM worker-tool calls to authorize them.'
     : classification === 'approval_id_unknown'
-      ? 'Unknown approval_id. Call a normal WCM worker tool directly to create a fresh independent approval.'
-      : 'This approval_id is not currently usable. Call a normal WCM worker tool directly to create a fresh independent approval.';
+      ? 'Unknown approval_id. Omit approval_id on a routed WCM worker-tool call to create a fresh independent approval.'
+      : 'This approval_id is not currently usable. Omit approval_id on a routed WCM worker-tool call to create a fresh independent approval.';
   return approvalStatus({
     classification,
     approval_required: request?.state === 'pending',
@@ -605,13 +605,6 @@ async function dispatchRoutedWorker({
   }
 }
 
-async function assertRealWorkerTool(deviceId, toolName, sourcePayload = null) {
-  const tools = await routedToolsForDevice(deviceId, sourcePayload);
-  const found = tools.find((tool) => tool.name === toolName && tool.name !== 'list_devices');
-  if (!found) throw new Error('Unknown or Router-local tool_name: ' + toolName);
-  return found;
-}
-
 async function executeTool(payload, sourcePayload = null) {
   const toolName = payload?.params?.name;
 
@@ -627,42 +620,6 @@ async function executeTool(payload, sourcePayload = null) {
     const args = payload?.params?.arguments || {};
     refreshApprovalPolicy();
     return structuredToolResult(approvalIdStatusValue(args.approval_id));
-  }
-
-  if (toolName === 'call_with_approval') {
-    const args = payload?.params?.arguments || {};
-    const device = typeof args.deviceId === 'string' ? getDevice(args.deviceId) : null;
-    if (!device) {
-      const detail = args.deviceId
-        ? 'Unknown or disabled deviceId: ' + args.deviceId
-        : 'deviceId is required.';
-      return toolResult({ error: detail, devices: hub.listStatus() }, true);
-    }
-    if (typeof args.tool_name !== 'string' || !args.tool_name) {
-      return toolResult({ error: 'tool_name is required.' }, true);
-    }
-    if (args.arguments != null && (typeof args.arguments !== 'object' || Array.isArray(args.arguments))) {
-      return toolResult({ error: 'arguments must be an object.' }, true);
-    }
-    try {
-      await assertRealWorkerTool(device.deviceId, args.tool_name, sourcePayload);
-    } catch (error) {
-      return toolResult({ error: String(error?.message || error) }, true);
-    }
-    const policy = refreshApprovalPolicy();
-    if (policy.mode === 'timed') {
-      const grant = timedGrantManager.active(args.approval_id);
-      if (!grant) {
-        return structuredToolResult(approvalIdStatusValue(args.approval_id), { isError: true });
-      }
-    }
-    return dispatchRoutedWorker({
-      device,
-      toolName: args.tool_name,
-      workerArguments: args.arguments || {},
-      sourcePayload,
-      requestIdPrefix: 'grant',
-    });
   }
 
   if (toolName === 'request_approval') {
@@ -777,7 +734,7 @@ async function executeTool(payload, sourcePayload = null) {
           ...retryable,
           action_state: 'approved_retryable',
           action_failed: false,
-          output: 'The owner action was not dispatched because the target worker is offline. The timed WCM grant is active. Use call_with_approval with this approval_id for later WCM calls.',
+          output: 'The owner action was not dispatched because the target worker is offline. The timed WCM grant is active. Pass this approval_id directly on later routed WCM tool calls.',
         }));
       }
 
@@ -801,7 +758,7 @@ async function executeTool(payload, sourcePayload = null) {
             action_state: 'consumed',
             action_failed: true,
           output: String(message.error?.message || JSON.stringify(message.error)) +
-            ' The timed WCM grant is active; use call_with_approval with this approval_id for later WCM calls.',
+            ' The timed WCM grant is active; pass this approval_id directly on later routed WCM tool calls.',
           }));
         }
         const workerResult = message.result || {};
@@ -811,7 +768,7 @@ async function executeTool(payload, sourcePayload = null) {
           action_state: 'consumed',
           action_failed: false,
           output: (workerToolText(workerResult) || 'Approved owner action completed.') +
-            ' Use call_with_approval with this approval_id for later WCM calls. Call a normal WCM tool directly to request another independent grant.',
+            ' Pass this approval_id directly on later routed WCM tool calls. Omit approval_id on a normal WCM tool call to request another independent grant.',
         }));
       } catch (error) {
         const state = approvalFailureState(error);
@@ -824,7 +781,7 @@ async function executeTool(payload, sourcePayload = null) {
           action_state: state,
           action_failed: false,
           output: String(error?.message || error) +
-            ' The timed WCM grant is active; use call_with_approval with this approval_id for later WCM calls.',
+            ' The timed WCM grant is active; pass this approval_id directly on later routed WCM tool calls.',
         }));
       }
     } catch (error) {
@@ -868,6 +825,19 @@ async function executeTool(payload, sourcePayload = null) {
   const policy = refreshApprovalPolicy();
   const workerArguments = mapPathArguments(stripDeviceRoutingArguments(args), device);
   if (policy.mode === 'timed') {
+    if (args?.approval_id) {
+      const grant = timedGrantManager.active(args.approval_id);
+      if (!grant) {
+        return structuredToolResult(approvalIdStatusValue(args.approval_id), { isError: true });
+      }
+      return dispatchRoutedWorker({
+        device,
+        toolName,
+        workerArguments,
+        sourcePayload,
+        requestIdPrefix: 'grant',
+      });
+    }
     const pending = pendingActionManager.ensurePending({
       deviceId: device.deviceId,
       toolName,
@@ -888,7 +858,7 @@ async function executeTool(payload, sourcePayload = null) {
   });
 }
 function sdkInstructions() {
-  return `Every Desktop Commander tool requires an explicit deviceId. WCM approval mode is controlled locally. In timed mode, every normal routed worker-tool call is frozen independently and returns approval_required=true with a fresh approval_id; call request_approval with that approval_id and an optional duration_seconds (default 21600). After approval, reuse that exact timed full-WCM grant through call_with_approval. Calling a normal worker tool directly always requests another independent approval. Multiple approval IDs can remain active concurrently. In off mode, routed tools and call_with_approval execute directly. list_devices reports only aggregate approval counts; approval_status performs point lookup for an ID you already possess. Default device: ${registry.defaultDeviceId}.\n\n${SPECIALIZED_CAPABILITIES}\n\n${WCM_ERROR_SEMANTICS}`;
+  return `Every Desktop Commander tool requires an explicit deviceId and also exposes an optional Router-only approval_id. WCM approval mode is controlled locally. In timed mode, omit approval_id to freeze that worker-tool call and receive a fresh independent approval_id; call request_approval with that ID and an optional duration_seconds (default 21600). After approval, pass that exact active approval_id directly on later routed WCM tool calls to reuse its timed full-WCM grant. WCM never auto-selects another active grant. Multiple approval IDs can remain active concurrently. In off mode, routed tools execute directly and any supplied approval_id is stripped before forwarding. list_devices reports only aggregate approval counts; approval_status performs point lookup for an ID you already possess. Default device: ${registry.defaultDeviceId}.\n\n${SPECIALIZED_CAPABILITIES}\n\n${WCM_ERROR_SEMANTICS}`;
 }
 
 function unwrapRoutedResult(message, fallback) {

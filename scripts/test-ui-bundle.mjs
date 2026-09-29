@@ -31,7 +31,7 @@ for (const marker of [
   'card_expires_at',
   'Valid until',
   'approval_already_bound',
-  'call_with_approval',
+  'Pass this approval_id directly on later routed WCM tool calls',
 ]) {
   assert.ok(html.includes(marker), `approval HTML is missing CCM-aligned marker: ${marker}`);
 }

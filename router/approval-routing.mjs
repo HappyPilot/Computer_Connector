@@ -81,48 +81,13 @@ export function approvalRouterTools() {
       outputSchema: approvalOutputSchema(),
     },
     {
-      name: 'call_with_approval',
-      description: [
-        'Call one real Desktop Commander worker tool using an already-approved WCM approval_id.',
-        'The approval_id must have an active, unexpired timed grant.',
-        'This Router-local wrapper does not modify Desktop Commander tool schemas or worker protocol.',
-        'To request another independent approval, call the normal WCM worker tool directly instead.',
-      ].join('\n\n'),
-      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
-      execution: { taskSupport: 'forbidden' },
-      inputSchema: {
-        type: 'object',
-        properties: {
-          approval_id: {
-            type: 'string',
-            format: 'uuid',
-            pattern: UUID_PATTERN,
-          },
-          deviceId: {
-            type: 'string',
-            minLength: 1,
-          },
-          tool_name: {
-            type: 'string',
-            minLength: 1,
-          },
-          arguments: {
-            type: 'object',
-            additionalProperties: true,
-            default: {},
-          },
-        },
-        required: ['approval_id', 'deviceId', 'tool_name'],
-        additionalProperties: false,
-        $schema: 'http://json-schema.org/draft-07/schema#',
-      },
-    },
-    {
       name: 'request_approval',
       description: [
         'Render the WCM approval card for one already-frozen pending action.',
         'Pass the approval_id plus an optional duration_seconds.',
-        'If duration_seconds is omitted, the requested duration is 21600 seconds.',
+        'If duration_seconds is omitted, the requested duration is 21600 seconds (6 hours).',
+        'Common values: 60=1 minute, 300=5 minutes, 1800=30 minutes, 3600=1 hour, 21600=6 hours, 86400=1 day, 604800=7 days.',
+        'The duration is frozen when the approval card is bound and starts only when the user approves.',
       ].join('\n\n'),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       execution: { taskSupport: 'forbidden' },

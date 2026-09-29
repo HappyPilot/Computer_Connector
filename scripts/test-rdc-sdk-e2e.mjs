@@ -143,11 +143,15 @@ async function verifySurface(client, { exerciseApproval = false } = {}) {
   for (const name of [
     'list_devices',
     'approval_status',
-    'call_with_approval',
     'request_approval',
     'resolve_pending_action',
   ]) {
     if (!tools.some((tool) => tool.name === name)) throw new Error(`SDK tools/list is missing ${name}.`);
+  }
+  const getConfigTool = tools.find((tool) => tool.name === 'get_config');
+  if (getConfigTool?.inputSchema?.properties?.approval_id?.format !== 'uuid' ||
+      getConfigTool?.inputSchema?.required?.includes('approval_id')) {
+    throw new Error('routed worker-tool schema is missing optional UUID approval_id.');
   }
   const requestApproval = tools.find((tool) => tool.name === 'request_approval');
   if (requestApproval?._meta?.['openai/outputTemplate'] !== APPROVAL_UI_URI) {
@@ -209,6 +213,13 @@ async function verifySurface(client, { exerciseApproval = false } = {}) {
     if (resolved.structuredContent?.state !== 'denied') {
       throw new Error('resolve_pending_action did not deny the frozen action.');
     }
+    const deniedReuse = await client.callTool({
+      name: 'get_config',
+      arguments: { deviceId, approval_id: approvalId },
+    });
+    if (!deniedReuse.isError || deniedReuse.structuredContent?.classification !== 'approval_id_denied') {
+      throw new Error('denied approval_id was not rejected by the routed worker tool.');
+    }
     return;
   }
   if (approvalDecision !== 'approve') {
@@ -226,16 +237,11 @@ async function verifySurface(client, { exerciseApproval = false } = {}) {
   }
 
   const usage = await client.callTool({
-    name: 'call_with_approval',
-    arguments: {
-      approval_id: approvalId,
-      deviceId,
-      tool_name: 'get_usage_stats',
-      arguments: {},
-    },
+    name: 'get_usage_stats',
+    arguments: { deviceId, approval_id: approvalId },
   });
   if (usage.isError) {
-    throw new Error('call_with_approval did not use the active grant.');
+    throw new Error('routed worker tool did not use the active approval_id grant.');
   }
 
   const fresh = await client.callTool({
@@ -270,17 +276,25 @@ async function verifySurface(client, { exerciseApproval = false } = {}) {
   const secondDevice = deviceInfo.devices?.find((item) => item.online && item.deviceId !== deviceId)?.deviceId;
   if (secondDevice) {
     const crossDevice = await client.callTool({
-      name: 'call_with_approval',
-      arguments: {
-        approval_id: approvalId,
-        deviceId: secondDevice,
-        tool_name: 'get_config',
-        arguments: {},
-      },
+      name: 'get_config',
+      arguments: { deviceId: secondDevice, approval_id: approvalId },
     });
     if (crossDevice.isError) {
       throw new Error('active approval-id grant did not cover another registered device.');
     }
+  }
+
+  const unknownReuse = await client.callTool({
+    name: 'get_usage_stats',
+    arguments: {
+      deviceId,
+      approval_id: '00000000-0000-4000-8000-000000000099',
+    },
+  });
+  if (!unknownReuse.isError ||
+      unknownReuse.structuredContent?.classification !== 'approval_id_unknown' ||
+      unknownReuse.structuredContent?.approval_required === true) {
+    throw new Error('unknown approval_id did not fail closed without creating a new approval.');
   }
 
   const approvalStatus = await client.callTool({

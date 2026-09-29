@@ -22,23 +22,25 @@ const routedSchema = withDeviceRoutingSchema({
 }, deviceSchema);
 assert.deepEqual(routedSchema.required.sort(), ['deviceId', 'value'].sort());
 assert.deepEqual(routedSchema.properties.deviceId.enum, ['device-a', 'device-b']);
+assert.equal(routedSchema.properties.approval_id.type, 'string');
+assert.equal(routedSchema.properties.approval_id.format, 'uuid');
+assert.equal(routedSchema.required.includes('approval_id'), false);
 assert.deepEqual(stripDeviceRoutingArguments({
   deviceId: 'device-a',
+  approval_id: '00000000-0000-4000-8000-000000000001',
   value: 'forward-me',
 }), { value: 'forward-me' });
 
 const approvalTools = approvalRouterTools();
 const statusTool = approvalTools.find((tool) => tool.name === 'approval_status');
-const callWithApproval = approvalTools.find((tool) => tool.name === 'call_with_approval');
 const requestCard = approvalTools.find((tool) => tool.name === 'request_approval');
 const resolver = approvalTools.find((tool) => tool.name === 'resolve_pending_action');
-assert.ok(statusTool && callWithApproval && requestCard && resolver);
-assert.deepEqual(statusTool.inputSchema.required, ['approval_id']);
+assert.ok(statusTool && requestCard && resolver);
 assert.deepEqual(
-  callWithApproval.inputSchema.required.sort(),
-  ['approval_id', 'deviceId', 'tool_name'].sort(),
+  approvalTools.map((tool) => tool.name),
+  ['approval_status', 'request_approval', 'resolve_pending_action'],
 );
-assert.equal(callWithApproval.inputSchema.properties.arguments.type, 'object');
+assert.deepEqual(statusTool.inputSchema.required, ['approval_id']);
 assert.deepEqual(requestCard.inputSchema.required, ['approval_id']);
 assert.equal(requestCard.inputSchema.properties.duration_seconds.default, 21600);
 assert.equal(requestCard.inputSchema.properties.duration_seconds.minimum, 60);
