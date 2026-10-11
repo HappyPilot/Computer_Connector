@@ -1,11 +1,5 @@
 # Agent Notes
 
-## Mobile MCP App UI diagnostics
-
-- Use the Router-local `ui_probe` tool to render the minimal diagnostic card; it is independent of the timed WCM approval mechanism. `ui_probe_ping` must remain app-only, read-only, without access to workers, tokens, grants, or the approval store.
-- Compare card HTML rendering, local JavaScript click, `ui/initialize` success, and the safe `tools/call` ping separately on Android and Web. A local click passing while ping fails means the embedded JavaScript ran, not that WCM is healthy or the host bridge worked.
-- A `Failed to fetch` reported by the diagnostic card is not evidence of a WCM command block. Correlate Router and HTTP ingress logs before attributing the error to the host or server. Never auto-retry a real frozen owner action based on a diagnostic result.
-
 ## Test safety on the live WCM host
 
 - Read this before running repository tests from ChatGPT/WCM.
