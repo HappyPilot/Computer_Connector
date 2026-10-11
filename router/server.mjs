@@ -39,6 +39,13 @@ import {
   approvalRouterTools,
   localApprovalResource,
 } from './approval-routing.mjs';
+import {
+  UI_PROBE_URI,
+  readUiProbeResource,
+  uiProbeResource,
+  uiProbeResult,
+  uiProbeTools,
+} from './ui-probe.mjs';
 
 const ROUTER_HOST = process.env.WC_ROUTER_HOST || '127.0.0.1';
 const ROUTER_PORT = Number(process.env.WC_ROUTER_PORT || 18009);
@@ -300,10 +307,11 @@ function augmentTools(tools) {
   ];
 }
 
-function addApprovalTools(tools) {
+function addRouterLocalTools(tools) {
   return [
     tools[0],
     ...approvalRouterTools(),
+    ...uiProbeTools(),
     ...tools.slice(1),
   ];
 }
@@ -530,16 +538,21 @@ async function routedToolsForDevice(deviceId, sourcePayload = null) {
 
 async function listTools(sourcePayload = null) {
   const tools = await routedToolsForDevice(registry.defaultDeviceId, sourcePayload);
-  return addApprovalTools(tools);
+  return addRouterLocalTools(tools);
 }
 
 async function routeResource(payload) {
   const method = String(payload?.method || '');
-  const local = localApprovalResource(payload);
+  if (method === 'resources/list') {
+    const listed = localApprovalResource(payload);
+    return { result: { resources: [...listed.result.resources, uiProbeResource()] } };
+  }
+  const local = readUiProbeResource(payload) || localApprovalResource(payload);
   if (local) {
     if (method === 'resources/read' && local?.result?.contents?.[0]?.text) {
       const bytes = Buffer.byteLength(local.result.contents[0].text, 'utf8');
-      appendRouterTrace('UI', `resource_read uri=${APPROVAL_UI_URI} bytes=${bytes}`);
+      const uri = payload?.params?.uri === UI_PROBE_URI ? UI_PROBE_URI : APPROVAL_UI_URI;
+      appendRouterTrace('UI', `resource_read uri=${uri} bytes=${bytes}`);
     }
     return local;
   }
@@ -607,6 +620,9 @@ async function dispatchRoutedWorker({
 
 async function executeTool(payload, sourcePayload = null) {
   const toolName = payload?.params?.name;
+
+  if (toolName === 'ui_probe') return structuredToolResult(uiProbeResult('ready'));
+  if (toolName === 'ui_probe_ping') return structuredToolResult(uiProbeResult('pong'));
 
   if (toolName === 'list_devices') {
     return toolResult({
