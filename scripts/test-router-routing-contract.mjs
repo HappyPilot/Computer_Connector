@@ -8,6 +8,7 @@ import {
   approvalRouterTools,
   localApprovalResource,
 } from '../router/approval-routing.mjs';
+import { RESTART_WCM_TOOL } from '../router/self-restart.mjs';
 
 const deviceSchema = {
   type: 'string',
@@ -32,6 +33,10 @@ assert.deepEqual(stripDeviceRoutingArguments({
 }), { value: 'forward-me' });
 
 const approvalTools = approvalRouterTools();
+assert.equal(RESTART_WCM_TOOL.name, 'restart_wcm');
+assert.deepEqual(RESTART_WCM_TOOL.inputSchema.required, undefined);
+assert.deepEqual(RESTART_WCM_TOOL.inputSchema.properties, {});
+assert.equal(RESTART_WCM_TOOL.inputSchema.additionalProperties, false);
 const statusTool = approvalTools.find((tool) => tool.name === 'approval_status');
 const requestCard = approvalTools.find((tool) => tool.name === 'request_approval');
 const resolver = approvalTools.find((tool) => tool.name === 'resolve_pending_action');

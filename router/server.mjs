@@ -21,6 +21,7 @@ import {
 } from './error-classification.mjs';
 import { guardRouterToolResult, resolveMaxRouterToolResultBytes } from './response-guard.mjs';
 import { ConnectionScopedToolListCache } from './tool-list-cache.mjs';
+import { RESTART_WCM_TOOL, requestWcmRestart } from './self-restart.mjs';
 import { routerClientInfo, serverInfo } from './server-info.mjs';
 import {
   stripDeviceRoutingArguments,
@@ -304,6 +305,7 @@ function addApprovalTools(tools) {
   return [
     tools[0],
     ...approvalRouterTools(),
+    RESTART_WCM_TOOL,
     ...tools.slice(1),
   ];
 }
@@ -529,7 +531,14 @@ async function routedToolsForDevice(deviceId, sourcePayload = null) {
 }
 
 async function listTools(sourcePayload = null) {
-  const tools = await routedToolsForDevice(registry.defaultDeviceId, sourcePayload);
+  let tools;
+  try {
+    tools = await routedToolsForDevice(registry.defaultDeviceId, sourcePayload);
+  } catch (error) {
+    routerLogger.error('Routed tool discovery unavailable; serving Router-local tools only: ' +
+      String(error?.message || error));
+    tools = augmentTools([]);
+  }
   return addApprovalTools(tools);
 }
 
@@ -607,6 +616,20 @@ async function dispatchRoutedWorker({
 
 async function executeTool(payload, sourcePayload = null) {
   const toolName = payload?.params?.name;
+
+  if (toolName === 'restart_wcm') {
+    try {
+      return structuredToolResult(requestWcmRestart({
+        root: process.cwd(),
+        args: payload?.params?.arguments ?? {},
+        audit: (message) => routerLogger.log(message),
+      }));
+    } catch (error) {
+      routerLogger.error('restart_wcm rejected: ' + String(error?.message || error));
+      return structuredToolResult({ status: 'rejected',
+        error: String(error?.message || error) }, { isError: true });
+    }
+  }
 
   if (toolName === 'list_devices') {
     return toolResult({
@@ -858,7 +881,7 @@ async function executeTool(payload, sourcePayload = null) {
   });
 }
 function sdkInstructions() {
-  return `Every Desktop Commander tool requires an explicit deviceId and also exposes an optional Router-only approval_id. WCM approval mode is controlled locally. In timed mode, omit approval_id to freeze that worker-tool call and receive a fresh independent approval_id; call request_approval with that ID and an optional duration_seconds (default 21600). After approval, pass that exact active approval_id directly on later routed WCM tool calls to reuse its timed full-WCM grant. WCM never auto-selects another active grant. Multiple approval IDs can remain active concurrently. In off mode, routed tools execute directly and any supplied approval_id is stripped before forwarding. list_devices reports only aggregate approval counts; approval_status performs point lookup for an ID you already possess. Default device: ${registry.defaultDeviceId}.\n\n${SPECIALIZED_CAPABILITIES}\n\n${WCM_ERROR_SEMANTICS}`;
+  return `Every Desktop Commander worker tool requires an explicit deviceId and also exposes an optional Router-only approval_id. WCM approval mode is controlled locally. In timed mode, omit approval_id to freeze that worker-tool call and receive a fresh independent approval_id; call request_approval with that ID and an optional duration_seconds (default 21600). After approval, pass that exact active approval_id directly on later routed WCM tool calls to reuse its timed full-WCM grant. WCM never auto-selects another active grant. Multiple approval IDs can remain active concurrently. In off mode, routed tools execute directly and any supplied approval_id is stripped before forwarding. Router-local restart_wcm requires no arguments, deviceId, or approval; it requests only a fixed Supervisor-managed Controller restart and may briefly interrupt MCP connections. list_devices reports only aggregate approval counts; approval_status performs point lookup for an ID you already possess. Default device: ${registry.defaultDeviceId}.\n\n${SPECIALIZED_CAPABILITIES}\n\n${WCM_ERROR_SEMANTICS}`;
 }
 
 function unwrapRoutedResult(message, fallback) {

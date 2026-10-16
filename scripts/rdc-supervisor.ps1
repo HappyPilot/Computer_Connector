@@ -1,4 +1,5 @@
 [CmdletBinding()]
+# WCM supervised lifecycle
 param()
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -34,6 +35,7 @@ $launcherInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$launcherPid" -
 $watchLauncher = $null -ne $launcherInfo -and $launcherInfo.Name -ieq 'wscript.exe'
 function LauncherAlive { if(-not $watchLauncher){ return $true }; return $null -ne (Get-Process -Id $launcherPid -ErrorAction SilentlyContinue) }
 function Log([string]$m){ "[$(Get-Date -Format s)] $m" | Out-File $supervisorLog -Encoding utf8 -Append }
+. (Join-Path $PSScriptRoot 'wcm-supervisor-restart.ps1')
 function Listener([int]$port){ Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -First 1 }
 function WaitPort([int]$port,[int]$seconds){
     for($i=0;$i -lt ($seconds*4);$i++){
@@ -95,13 +97,23 @@ try {
             Set-Content (Join-Path $stateDir 'rdc-sidecar.pid') $side.Id -Encoding ASCII
             if(-not (WaitPort 18008 10)){ throw 'RDC OAuth sidecar did not listen on 18008.' }
             Log "ready router=$($routerProc.Id) worker=$($workerProc.Id) sidecar=$($side.Id)"
+            $restartRequested = $false
             while(-not $routerProc.HasExited -and -not $workerProc.HasExited -and -not $side.HasExited){
                 if(-not (LauncherAlive)){ Log 'scheduled-task launcher exited'; return }
+                try { Write-WcmHeartbeat } catch { Log ('Heartbeat unavailable: ' + $_.Exception.Message) }
+                if (Read-WcmRestartSignal) {
+                    $restartRequested = $true
+                    Log 'supervised Controller restart commencing'
+                    break
+                }
                 Start-Sleep -Seconds 2
             }
-            Log "child exited routerExit=$($routerProc.HasExited) workerExit=$($workerProc.HasExited) sidecarExit=$($side.HasExited)"
+            if (-not $restartRequested) {
+                Log "child exited routerExit=$($routerProc.HasExited) workerExit=$($workerProc.HasExited) sidecarExit=$($side.HasExited)"
+            }
         } catch { Log ('error: ' + $_.Exception.Message) }
         finally {
+            Remove-WcmHeartbeat
             StopTree $side
             StopTree $workerProc
             StopTree $routerProc
@@ -111,6 +123,7 @@ try {
     }
 }
 finally {
+    Remove-WcmHeartbeat
     Remove-Item -LiteralPath $supervisorPidFile -Force -ErrorAction SilentlyContinue
     try { $mutex.ReleaseMutex() } catch {}
     $mutex.Dispose()

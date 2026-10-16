@@ -8,6 +8,8 @@
 - This 502 is an operational/self-hosting failure, not a WCM command-blocklist rejection.
 - Prefer running `npm test` from an independent local PowerShell/terminal outside the active WCM control path. If that is unavailable, run only the smallest targeted test needed and avoid tests that spawn/tear down gateway-like worker processes.
 - Do not restart or stop the live gateway from inside its own WCM session unless an independent recovery path is already available.
+- `restart_wcm` is a Router-local, no-argument, no-approval request to the existing Supervisor. It cannot dispatch commands or select a remote device; a returned `accepted` means the Supervisor will perform the restart asynchronously, not that health has recovered. Use an independent CCM channel to observe recovery. Never replace this narrow exception with arbitrary no-approval process execution.
+- After a Router tool/schema deployment, use ChatGPT's plugin-management **Refresh tools** control rather than a new plugin registration; check the refreshed schema before relying on it.
 
 ## WCM error semantics
 
