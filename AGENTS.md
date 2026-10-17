@@ -4,7 +4,8 @@
 
 - The only published WCM icon path is `/rdc/icon.png` (served by the OAuth sidecar without credentials); its bytes come exclusively from `assets/wcm-icon.png`. No general file-serving routes or authentication exemptions for `/rdc/mcp`.
 - `router/server-info.mjs` must advertise that **same-origin HTTPS** URL through `initialize.serverInfo.icons` only while a valid PNG is present. Keep the Tailscale Funnel allowlist in `scripts/configure-rdc-funnel.ps1` and `scripts/disable-rdc-funnel.ps1` in sync.
-- `assets/ICON_PROMPT.txt` is the authoritative production prompt. Generate/revise the PNG only with the explicitly selected CPA ImgGen workflow, inspect the candidate, and never substitute a synthetic placeholder or another backend silently. CPA credentials belong in environment variables, not files or commits.
+- ChatGPT plugin creation **requires manual icon upload under 10 KB**. Upload `assets/wcm-plugin-icon.png` (optimized transparency-preserving PNG), **not** the full-resolution `assets/wcm-icon.png` or its URL. MCP server icon metadata is separate from ChatGPT plugin creation and does not replace the manual upload. Keep the derived PNG under 10,000 bytes (prefer a 9,000-byte build budget); regenerate it with `scripts/build-plugin-icon.py` after source image changes, and verify it using `scripts/test-icon.mjs`.
+- `assets/ICON_PROMPT.txt` is the authoritative production prompt. Generate/revise the original artwork only with the explicitly selected CPA ImgGen workflow, inspect the candidate, and never substitute a synthetic placeholder or another backend silently. Deriving the smaller upload copy through deterministic resizing and PNG quantization is permitted. CPA credentials must stay in secure local client configuration or environment variables, never in prompts, scripts, or commits.
 
 ## Test safety on the live WCM host
 

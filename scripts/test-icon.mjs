@@ -7,12 +7,20 @@ import { iconUrlForResource, readIconPng } from '../rdc-sidecar/icon.mjs';
 import { createRdcServer, listenRdcServer, closeRdcServer } from '../rdc-sidecar/server.mjs';
 import { createServerInfo } from '../router/server-info.mjs';
 
+const uploadIconFile = new URL('../assets/wcm-plugin-icon.png', import.meta.url);
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wcm-icon-test-'));
 const iconFile = path.join(tmp, 'icon.png');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lL0AAAAASUVORK5CYII=', 'base64');
 const resource = 'https://wcm.example.com/rdc/mcp';
 
 async function test() {
+  const uploadedIcon = fs.readFileSync(uploadIconFile);
+  assert.ok(uploadedIcon.length < 10000, 'ChatGPT manual-upload icon must be under 10 KB');
+  assert.ok(uploadedIcon.length > 1000, 'Manual-upload icon must not be a blank placeholder');
+  assert.ok(readIconPng(uploadIconFile), 'Manual-upload icon must be a valid PNG');
+  assert.equal(uploadedIcon.readUInt32BE(16), 128);
+  assert.equal(uploadedIcon.readUInt32BE(20), 128);
+  assert.ok(uploadedIcon.includes(Buffer.from('tRNS')), 'Manual-upload PNG must preserve transparency');
   assert.equal(iconUrlForResource(resource), 'https://wcm.example.com/rdc/icon.png');
   for (const invalid of ['', null, 'http://wcm.example.com/rdc/mcp', 'https://user:pass@wcm.example.com/rdc/mcp', 'https://wcm.example.com/wrong', 'https://wcm.example.com/rdc/mcp?key=secret']) {
     assert.equal(iconUrlForResource(invalid), null);
