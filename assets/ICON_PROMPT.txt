@@ -1,0 +1,5 @@
+Create ONE production-ready square app icon for "Windows Console MCP" (WCM), a secure multi-device computer-control MCP gateway.
+
+Art direction: premium minimalist vector-like symbol, memorable at 24 px, on a fully transparent background. Build a bold rounded four-pane window motif interwoven with a clean terminal chevron and a small connected node. Convey Windows computers, command-line control, and secure routing without drawing a literal monitor or padlock. Deep indigo and bright cyan, crisp high contrast, simple solid geometry, subtle depth only where it helps. Centered generous safe margins and balanced optical weight. Professional contemporary infrastructure product identity, not cartoon, not photorealistic.
+
+Hard requirements: perfectly square composition; no letters, no text, no watermarks, no surrounding border or mockup; no tiny hairline strokes, gradients-only detail, or busy patterns. All meaningful shapes must remain readable at favicon size. Deliver a single polished standalone PNG icon, ideally 1024x1024 with transparency. Do not borrow another product's trademark or logo.

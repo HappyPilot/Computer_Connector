@@ -25,6 +25,14 @@ Controller
 
 The public `/rdc/mcp` endpoint uses the MCP SDK `StreamableHTTPServerTransport`, matching CCM's standard initialize/session lifecycle.
 
+## MCP identity icon
+
+WCM has a dedicated, public PNG endpoint at `/rdc/icon.png` on the same HTTPS origin as the protected `/rdc/mcp` endpoint. The sidecar serves only the fixed repository asset `assets/wcm-icon.png` (GET and HEAD, no OAuth needed); it does **not** expose a general file server. The MCP `initialize.serverInfo` includes the icon's absolute HTTPS URL and its actual dimensions only when the PNG exists and passes basic file checks. With no image installed, icon metadata is omitted rather than advertising a broken link. The server display title is `Windows Console MCP`.
+
+The canonical image-generation brief is [`assets/ICON_PROMPT.txt`](assets/ICON_PROMPT.txt). Generate the icon with **CPA ImgGen** (not a substitute image engine), inspect its appearance at small sizes, and save the approved transparent square PNG as `assets/wcm-icon.png` (at most 1 MiB, with width/height from 1 to 4096 pixels). CPA credentials must be provided to the generation client via its `CPA_BASE_URL` and `CPA_API_KEY` environment variables; they must not be checked into this repository. Until the icon is actually generated and checked in, the endpoint returns 404.
+
+The Tailscale Funnel is configured with **exact path mappings**, so apply the updated `scripts/configure-rdc-funnel.ps1` route configuration when deploying the icon. The route list now includes `/rdc/icon.png`; its removal counterpart is `scripts/disable-rdc-funnel.ps1`. Deploying a new icon also requires restarting the Controller Router and sidecar using the supervised lifecycle so new MCP sessions advertise it; existing connected clients may need a plugin refresh/reconnection. Client UIs may choose not to display server-provided icons even when MCP advertises them.
+
 ## Controller setup
 
 ```powershell
@@ -96,6 +104,8 @@ The router also advertises bundled specialized capabilities in MCP discovery, `l
 npm test
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\rdc-status.ps1
 ```
+
+The `scripts/test-icon.mjs` case tests URL validation, PNG validation, public GET/HEAD responses, the missing-file case, and continued OAuth enforcement on `/rdc/mcp`, using only an ephemeral test asset.
 
 `npm test` is self-contained with respect to test data/config, but do not launch it through the same live WCM connection that is controlling this checkout: doing so can interrupt that worker/gateway transport and cause temporary HTTP 502s. Run it from an independent local terminal instead. It validates the CCM-aligned static approval View, checks the frozen approval state machine and routing contracts, and covers OAuth state pruning/caps, worker heartbeat expiry, and reconnect isolation.
 

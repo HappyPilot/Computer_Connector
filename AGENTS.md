@@ -1,5 +1,11 @@
 # Agent Notes
 
+## MCP branding asset
+
+- The only published WCM icon path is `/rdc/icon.png` (served by the OAuth sidecar without credentials); its bytes come exclusively from `assets/wcm-icon.png`. No general file-serving routes or authentication exemptions for `/rdc/mcp`.
+- `router/server-info.mjs` must advertise that **same-origin HTTPS** URL through `initialize.serverInfo.icons` only while a valid PNG is present. Keep the Tailscale Funnel allowlist in `scripts/configure-rdc-funnel.ps1` and `scripts/disable-rdc-funnel.ps1` in sync.
+- `assets/ICON_PROMPT.txt` is the authoritative production prompt. Generate/revise the PNG only with the explicitly selected CPA ImgGen workflow, inspect the candidate, and never substitute a synthetic placeholder or another backend silently. CPA credentials belong in environment variables, not files or commits.
+
 ## Test safety on the live WCM host
 
 - Read this before running repository tests from ChatGPT/WCM.

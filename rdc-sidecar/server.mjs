@@ -4,6 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.mjs';
+import { MCP_ICON_FILE, MCP_ICON_MIME, MCP_ICON_PATH, readIconPng } from './icon.mjs';
 import {
   OAuthError,
   OAuthStore,
@@ -757,6 +758,22 @@ async function handleRequest(request, response, runtime) {
     });
     return;
   }
+  if (url.pathname === MCP_ICON_PATH && (request.method === 'GET' || request.method === 'HEAD')) {
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    const png = readIconPng(runtime.iconFile);
+    if (!png) {
+      sendJson(response, 404, { error: 'not_found' }, { noStore: true });
+      return;
+    }
+    response.statusCode = 200;
+    response.setHeader('Content-Type', MCP_ICON_MIME);
+    response.setHeader('Content-Length', String(png.length));
+    response.setHeader('Cache-Control', 'public, max-age=300');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.end(request.method === 'HEAD' ? undefined : png);
+    return;
+  }
   if (AUTHORIZATION_DISCOVERY_PATHS.has(url.pathname) && request.method === 'GET') {
     sendJson(response, 200, buildAuthorizationServerMetadata(runtime.config), {
       noStore: true,
@@ -821,6 +838,7 @@ export function createRdcServer(options = {}) {
     logger,
     upstreamUrl,
     approvalSecret,
+    iconFile: options.iconFile ?? MCP_ICON_FILE,
     registrationAttempts: new Map(),
     server: null,
   };
