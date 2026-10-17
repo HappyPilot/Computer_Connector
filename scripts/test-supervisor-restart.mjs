@@ -27,6 +27,10 @@ function Log([string]$message) {}
 Write-WcmHeartbeat
 $heartbeat = Get-Content -LiteralPath $wcmHeartbeat -Raw | ConvertFrom-Json
 if ($heartbeat.supervisor_pid -ne $PID) { throw 'Heartbeat PID mismatch' }
+Start-Sleep -Milliseconds 10
+Write-WcmHeartbeat
+$heartbeat2 = Get-Content -LiteralPath $wcmHeartbeat -Raw | ConvertFrom-Json
+if ($heartbeat2.timestamp_ms -le $heartbeat.timestamp_ms) { throw 'Heartbeat failed to refresh' }
 $id = [guid]::NewGuid().ToString()
 Write-WcmState $wcmRestartRequest @{ version = 1; request_id = $id; created_at_ms = ([long]((Wcm-NowMs) - 4000)) }
 if (-not (Read-WcmRestartSignal)) { throw 'Valid restart signal was not consumed' }

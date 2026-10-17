@@ -10,7 +10,14 @@ function Write-WcmState([string]$file, $value) {
     $serialized = ConvertTo-Json -InputObject $value -Compress
     [System.IO.File]::WriteAllText($temporary, $serialized, (New-Object System.Text.UTF8Encoding($false)))
     if (Test-Path -LiteralPath $file) {
-        [System.IO.File]::Replace($temporary, $file, $null)
+        try {
+            [System.IO.File]::Replace($temporary, $file, $null)
+        } catch {
+            # Some Windows redirected/profile filesystems do not support File.Replace.
+            # Keep the Supervisor alive and publish the fixed state path by rename.
+            [System.IO.File]::Delete($file)
+            [System.IO.File]::Move($temporary, $file)
+        }
     } else {
         [System.IO.File]::Move($temporary, $file)
     }
