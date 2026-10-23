@@ -140,6 +140,62 @@ const sdkTransports = new Map();
 const sdkServers = new Map();
 const workerInitialization = new Map();
 const toolListCache = new ConnectionScopedToolListCache();
+const executionHealth = new Map();
+
+function setExecutionHealth(deviceId, ready, details = {}) {
+  const info = hub.connectionInfo(deviceId);
+  const previous = executionHealth.get(deviceId) || {};
+  executionHealth.set(deviceId, {
+    connectionId: info?.connectionId || null,
+    ready: Boolean(ready),
+    checkedAt: new Date().toISOString(),
+    lastSuccessAt: ready ? new Date().toISOString() : previous.lastSuccessAt || null,
+    toolsCount: Number.isInteger(details.toolsCount) ? details.toolsCount : previous.toolsCount ?? null,
+    latencyMs: Number.isFinite(details.latencyMs) ? Math.max(0, Math.round(details.latencyMs)) : null,
+    error: ready ? null : String(details.error || 'execution probe failed').slice(0, 240),
+  });
+}
+
+function deviceStatuses() {
+  return hub.listStatus().map((device) => {
+    const health = executionHealth.get(device.deviceId);
+    const sameConnection = Boolean(health && health.connectionId && health.connectionId === hub.connectionInfo(device.deviceId)?.connectionId);
+    return {
+      ...device,
+      executionReady: device.online && sameConnection ? health.ready : (device.online ? null : false),
+      executionStatus: !device.online ? 'offline' : !sameConnection ? 'unknown' : (health.ready ? 'ready' : 'degraded'),
+      lastExecutionCheckAt: sameConnection ? health.checkedAt : undefined,
+      lastExecutionSuccessAt: sameConnection ? health.lastSuccessAt : undefined,
+      executionProbeLatencyMs: sameConnection ? health.latencyMs : undefined,
+      executionToolsCount: sameConnection ? health.toolsCount : undefined,
+      executionError: sameConnection && !health.ready ? health.error : undefined,
+    };
+  });
+}
+
+async function probeDeviceExecution(deviceId, timeoutMs = 5000) {
+  const info = hub.connectionInfo(deviceId);
+  if (!info) {
+    setExecutionHealth(deviceId, false, { error: 'worker offline' });
+    return { deviceId, online: false, executionReady: false, error: 'worker offline' };
+  }
+  const started = Date.now();
+  try {
+    await ensureWorkerInitialized(deviceId);
+    const message = await hub.call(deviceId, {
+      jsonrpc: '2.0', id: 'probe-' + randomUUID(), method: 'tools/list', params: {},
+    }, timeoutMs);
+    const tools = message?.result?.tools;
+    if (!Array.isArray(tools)) throw new Error('tools/list returned no tools array');
+    const latencyMs = Date.now() - started;
+    setExecutionHealth(deviceId, true, { toolsCount: tools.length, latencyMs });
+    return { deviceId, online: true, executionReady: true, toolsCount: tools.length, latencyMs };
+  } catch (error) {
+    const latencyMs = Date.now() - started;
+    setExecutionHealth(deviceId, false, { error: error?.message || error, latencyMs });
+    return { deviceId, online: true, executionReady: false, latencyMs, error: String(error?.message || error) };
+  }
+}
 
 function enabledDevices() {
   return registry.devices.filter((device) => device.enabled);
@@ -220,12 +276,19 @@ async function ensureWorkerInitialized(deviceId, sourcePayload = null) {
 }
 
 async function callWorker(deviceId, payload, sourcePayload = null) {
-  await ensureWorkerInitialized(deviceId, sourcePayload);
-  const message = await hub.call(deviceId, stripModernMeta(payload));
-  if (!message || typeof message !== 'object') {
-    throw new Error('Worker returned an invalid JSON-RPC response: ' + deviceId);
+  const started = Date.now();
+  try {
+    await ensureWorkerInitialized(deviceId, sourcePayload);
+    const message = await hub.call(deviceId, stripModernMeta(payload));
+    if (!message || typeof message !== 'object') {
+      throw new Error('Worker returned an invalid JSON-RPC response: ' + deviceId);
+    }
+    setExecutionHealth(deviceId, true, { latencyMs: Date.now() - started });
+    return message;
+  } catch (error) {
+    setExecutionHealth(deviceId, false, { error: error?.message || error, latencyMs: Date.now() - started });
+    throw error;
   }
-  return message;
 }
 
 function toolDeviceSchema() {
@@ -276,6 +339,28 @@ function stripToolUiMetadata(tool) {
   return copy;
 }
 
+function compactToolDescription(name, description) {
+  const raw = String(description || '').replace(/\r/gu, '').trim();
+  const cutMarkers = [
+    '\nExamples:', '\nEXAMPLES:', '\nMACOS-SPECIFIC NOTES:', '\nWINDOWS-SPECIFIC NOTES:',
+    '\nIMPORTANT:', '\nWCM FAILURE RULE:', '\nThis command can be referenced',
+  ];
+  let compact = raw;
+  for (const marker of cutMarkers) {
+    const index = compact.indexOf(marker);
+    if (index >= 0) compact = compact.slice(0, index).trim();
+  }
+  compact = compact
+    .replace(/\n{3,}/gu, '\n\n')
+    .replace(/[ \t]+/gu, ' ')
+    .trim();
+  if (compact.length > 640) compact = compact.slice(0, 637).replace(/\s+\S*$/u, '') + '…';
+  const suffix = name === 'read_multiple_files'
+    ? ' Uses bounded responses; large image sets should be read in small batches.'
+    : '';
+  return `${compact || name + ' operation.'}\n\nRuns on one explicit deviceId.${suffix}`;
+}
+
 function augmentTools(tools) {
   const routed = tools.map((tool) => {
     const baseTool = stripToolUiMetadata(tool);
@@ -283,22 +368,26 @@ function augmentTools(tools) {
       baseTool?.inputSchema,
       toolDeviceSchema(),
     );
-    const capabilityHint = baseTool.name === 'start_process'
-      ? `\n\n${SPECIALIZED_CAPABILITIES}`
-      : '';
-    const stabilityHint = baseTool.name === 'read_multiple_files'
-      ? '\n\nMEDIA STABILITY: When reading images, use at most four image paths per call. For larger slide/image sets, inspect in batches or create a contact sheet with start_process.'
-      : '';
-    const description = typeof baseTool.description === 'string'
-      ? `${baseTool.description}${capabilityHint}${stabilityHint}\n\n${WCM_TOOL_FAILURE_RULE}`
-      : `${capabilityHint}${stabilityHint}\n\n${WCM_TOOL_FAILURE_RULE}`.trim();
+    const description = compactToolDescription(baseTool.name, baseTool.description);
     return { ...baseTool, description, inputSchema };
   });
   return [
     {
       name: 'list_devices',
-      description: `List Computer Connector devices and their online status.\n\n${SPECIALIZED_CAPABILITIES}\n\n${WCM_ERROR_SEMANTICS}`,
+      description: 'List registered devices with transport and last-known execution readiness.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    },
+    {
+      name: 'probe_devices',
+      description: 'Run an end-to-end read-only tools/list probe through each selected worker and report execution readiness.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          deviceId: toolDeviceSchema(),
+          timeout_ms: { type: 'integer', minimum: 500, maximum: 15000, default: 5000 },
+        },
+        additionalProperties: false,
+      },
     },
     ...routed,
   ];
@@ -641,8 +730,20 @@ async function executeTool(payload, sourcePayload = null) {
   if (toolName === 'list_devices') {
     return toolResult({
       defaultDeviceId: registry.defaultDeviceId,
-      devices: hub.listStatus(),
+      devices: deviceStatuses(),
       approval: approvalRuntimeSnapshot(),
+    });
+  }
+
+  if (toolName === 'probe_devices') {
+    const args = payload?.params?.arguments || {};
+    const timeoutMs = Number.isInteger(args.timeout_ms) ? Math.min(15000, Math.max(500, args.timeout_ms)) : 5000;
+    const targetIds = args.deviceId ? [String(args.deviceId)] : enabledDevices().map((device) => device.deviceId);
+    const results = await Promise.all(targetIds.map((deviceId) => probeDeviceExecution(deviceId, timeoutMs)));
+    return toolResult({
+      probedAt: new Date().toISOString(),
+      results,
+      devices: deviceStatuses(),
     });
   }
 
@@ -857,7 +958,7 @@ async function executeTool(payload, sourcePayload = null) {
   const { args, deviceId, device } = selectedToolDevice(payload);
   if (!device) {
     const detail = deviceId ? 'Unknown or disabled deviceId: ' + deviceId : 'deviceId is required.';
-    return toolResult({ error: detail, devices: hub.listStatus() }, true);
+    return toolResult({ error: detail, devices: deviceStatuses() }, true);
   }
 
   const hostSession = hostSessionFor(payload, sourcePayload);
@@ -906,7 +1007,7 @@ async function executeTool(payload, sourcePayload = null) {
   });
 }
 function sdkInstructions() {
-  return `Every Desktop Commander worker tool requires an explicit deviceId and also exposes an optional Router-only approval_id. WCM approval mode is controlled locally. In timed mode, omit approval_id to freeze that worker-tool call and receive a fresh independent approval_id; call request_approval with that ID and an optional duration_seconds (default 21600). After approval, pass that exact active approval_id directly on later routed WCM tool calls to reuse its timed full-WCM grant. WCM never auto-selects another active grant. Multiple approval IDs can remain active concurrently. In off mode, routed tools execute directly and any supplied approval_id is stripped before forwarding. Router-local restart_wcm requires no arguments, deviceId, or approval; it requests only a fixed Supervisor-managed Controller restart and may briefly interrupt MCP connections. list_devices reports only aggregate approval counts; approval_status performs point lookup for an ID you already possess. Default device: ${registry.defaultDeviceId}.\n\n${SPECIALIZED_CAPABILITIES}\n\n${WCM_ERROR_SEMANTICS}`;
+  return `Computer Connector routes each worker action to one explicit deviceId. list_devices reports transport plus last-known execution readiness; probe_devices performs a fresh read-only end-to-end readiness check. In timed approval mode, a worker action without approval_id returns a pending approval request; an active approval_id may be reused until its expiry. Default device metadata: ${registry.defaultDeviceId}.`;
 }
 
 function unwrapRoutedResult(message, fallback) {
@@ -1009,7 +1110,7 @@ async function handleRequest(request, response) {
       status: 'ok',
       service: 'computer-connector-router',
       defaultDeviceId: registry.defaultDeviceId,
-      devices: hub.listStatus(),
+      devices: deviceStatuses(),
     });
     return;
   }

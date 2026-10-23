@@ -313,11 +313,25 @@ async function main() {
     const pingTool = initialized.tools.find((tool) => tool.name === 'ping');
     assert.ok(pingTool);
     assert.ok(pingTool.inputSchema.required.includes('deviceId'));
+    const probeTool = initialized.tools.find((tool) => tool.name === 'probe_devices');
+    assert.ok(probeTool);
+    for (const tool of initialized.tools) {
+      const description = String(tool.description || '');
+      assert.ok(description.length <= 900, `tool description too large: ${tool.name} (${description.length})`);
+      assert.doesNotMatch(description, /ONLY correct tool|NEVER use|MANDATORY workflow|REQUIRED workflow/iu);
+    }
 
     const devices = await callTool(baseUrl, initialized.state, 'list_devices', {}, null, 10);
     assert.notEqual(devices.isError, true);
     assert.deepEqual(deviceStatus(devices).map((device) => device.deviceId), ['device-a', 'device-b']);
     assert.ok(deviceStatus(devices).every((device) => device.online));
+    assert.equal(deviceStatus(devices).find((device) => device.deviceId === 'device-b')?.executionStatus, 'unknown');
+
+    const probe = await callTool(baseUrl, initialized.state, 'probe_devices', {}, null, 101);
+    assert.notEqual(probe.isError, true);
+    const probePayload = JSON.parse(resultText(probe));
+    assert.ok(probePayload.results.every((item) => item.executionReady === true));
+    assert.ok(probePayload.devices.every((device) => device.executionStatus === 'ready'));
 
     const pingA = await callTool(baseUrl, initialized.state, 'ping', { deviceId: 'device-a' }, null, 11);
     const pingB = await callTool(baseUrl, initialized.state, 'ping', { deviceId: 'device-b' }, null, 12);

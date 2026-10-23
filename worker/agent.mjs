@@ -49,8 +49,11 @@ let socket = null;
 let connected = false;
 let stopping = false;
 let inputBuffer = '';
+let dcGeneration = 0;
+let lastDcResponseAt = null;
 const pendingByRpcId = new Map();
 let nextWorkerRpcSequence = 0;
+const CONTROL_RPC_TIMEOUT_MS = 10000;
 
 function rpcKey(id) {
   return typeof id + ':' + JSON.stringify(id);
@@ -65,6 +68,7 @@ function writeFrame(value) {
   if (socket && !socket.destroyed) socket.write(JSON.stringify(value) + '\n');
 }
 function startDesktopCommander() {
+  dcGeneration += 1;
   child = spawn(dcNode, [dcScript], {
     cwd: path.dirname(dcScript),
     windowsHide: true,
@@ -82,6 +86,8 @@ function startDesktopCommander() {
     const key = rpcKey(message.id);
     const pending = pendingByRpcId.get(key);
     if (!pending) return;
+    lastDcResponseAt = Date.now();
+    if (pending.timer) clearTimeout(pending.timer);
     if (shouldGuardDesktopCommanderResponse(pending.method)) {
       message = guardDesktopCommanderMessage(message, Buffer.byteLength(text, 'utf8'), maxDcResponseBytes);
     }
@@ -92,13 +98,23 @@ function startDesktopCommander() {
       message: { ...message, id: pending.originalRpcId },
     });
   });
+  lines.on('close', () => {
+    if (!stopping && child && child.exitCode === null && child.signalCode === null) {
+      try { child.kill(); } catch {}
+    }
+  });
   child.stderr.on('data', (chunk) => process.stderr.write('[desktop-commander] ' + chunk.toString('utf8')));
   child.on('exit', () => {
     for (const pending of pendingByRpcId.values()) {
+      if (pending.timer) clearTimeout(pending.timer);
       writeFrame({ type: 'response', requestId: pending.requestId, error: 'Desktop Commander exited.' });
     }
     pendingByRpcId.clear();
-    if (!stopping) setTimeout(startDesktopCommander, 2000);
+    lastDcResponseAt = null;
+    if (!stopping) {
+      try { socket?.destroy(); } catch {}
+      setTimeout(startDesktopCommander, 2000);
+    }
   });
 }
 function sendToDesktopCommander(frame) {
@@ -117,11 +133,23 @@ function sendToDesktopCommander(frame) {
       return;
     }
     const workerRpcId = allocateWorkerRpcId();
-    pendingByRpcId.set(rpcKey(workerRpcId), {
+    const method = String(payload.method || '');
+    const key = rpcKey(workerRpcId);
+    const pending = {
       requestId: frame.requestId,
       originalRpcId: payload.id,
-      method: String(payload.method || ''),
-    });
+      method,
+      timer: null,
+    };
+    if (method === 'initialize' || method === 'tools/list') {
+      pending.timer = setTimeout(() => {
+        if (pendingByRpcId.get(key) !== pending) return;
+        pendingByRpcId.delete(key);
+        writeFrame({ type: 'response', requestId: frame.requestId, error: 'Desktop Commander control RPC timed out.' });
+        try { child?.kill(); } catch {}
+      }, CONTROL_RPC_TIMEOUT_MS);
+    }
+    pendingByRpcId.set(key, pending);
     outbound = { ...payload, id: workerRpcId };
   }
   child.stdin.write(JSON.stringify(outbound) + '\n');
@@ -134,7 +162,14 @@ function handleControllerFrame(frame) {
     return;
   }
   if (frame?.type === 'ping') {
-    writeFrame({ type: 'pong', at: Date.now() });
+    writeFrame({
+      type: 'pong',
+      at: Date.now(),
+      dcGeneration,
+      dcAlive: Boolean(child && child.exitCode === null && child.signalCode === null),
+      lastDcResponseAt,
+      pendingCount: pendingByRpcId.size,
+    });
     return;
   }
   if (frame?.type === 'request' || frame?.type === 'notify') {
@@ -143,6 +178,10 @@ function handleControllerFrame(frame) {
 }
 function connectController() {
   if (stopping) return;
+  if (!child || child.exitCode !== null || child.signalCode !== null || !child.stdin?.writable) {
+    setTimeout(connectController, Math.max(250, reconnectMs));
+    return;
+  }
   connected = false;
   inputBuffer = '';
   socket = net.createConnection({ host: controllerHost, port: controllerPort });

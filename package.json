@@ -11,6 +11,7 @@
   "scripts": {
     "postinstall": "node scripts/apply-desktop-commander-image-guard.mjs",
     "start:private": "node router/server.mjs",
+    "doctor": "node scripts/doctor.mjs",
     "check:ui": "node scripts/test-ui-bundle.mjs",
     "test": "npm run check:ui && node scripts/test-icon.mjs && node scripts/test-approval-policy.mjs && node scripts/test-approval.mjs && node scripts/test-router-routing-contract.mjs && node scripts/test-session-affinity.mjs && node scripts/test-private-mode-integration.mjs && node scripts/test-self-restart.mjs && node --test scripts/test-supervisor-restart.mjs && node worker/tests/native-template-smoke.mjs && node scripts/test-self-contained.mjs",
     "test:session-affinity": "node scripts/test-session-affinity.mjs",

@@ -160,7 +160,13 @@ export class WorkerHub {
 
   #handleFrame(state, frame) {
     state.lastSeen = Date.now();
-    if (frame?.type === 'pong') return;
+    if (frame?.type === 'pong') {
+      state.dcGeneration = Number.isInteger(frame.dcGeneration) ? frame.dcGeneration : state.dcGeneration;
+      state.dcAlive = typeof frame.dcAlive === 'boolean' ? frame.dcAlive : state.dcAlive;
+      state.lastDcResponseAt = Number.isFinite(frame.lastDcResponseAt) ? frame.lastDcResponseAt : state.lastDcResponseAt;
+      state.dcPendingCount = Number.isInteger(frame.pendingCount) ? frame.pendingCount : state.dcPendingCount;
+      return;
+    }
     if (frame?.type !== 'response' || typeof frame.requestId !== 'string') return;
     const pending = this.pending.get(frame.requestId);
     if (!pending || pending.deviceId !== state.deviceId) return;
@@ -199,6 +205,10 @@ export class WorkerHub {
       name: state.name,
       transport: state.transport,
       sourceIp: state.sourceIp,
+      dcGeneration: state.dcGeneration,
+      dcAlive: state.dcAlive,
+      lastDcResponseAt: state.lastDcResponseAt,
+      dcPendingCount: state.dcPendingCount,
     };
   }
   listStatus() {
@@ -213,6 +223,11 @@ export class WorkerHub {
         connectedAt: info?.connectedAt || undefined,
         transport: info?.transport || undefined,
         sourceIp: info?.sourceIp || undefined,
+        connectionId: info?.connectionId || undefined,
+        dcGeneration: info?.dcGeneration ?? undefined,
+        dcAlive: info?.dcAlive ?? undefined,
+        lastDcResponseAt: info?.lastDcResponseAt || undefined,
+        dcPendingCount: info?.dcPendingCount ?? undefined,
       };
     });
   }

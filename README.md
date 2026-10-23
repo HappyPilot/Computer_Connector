@@ -69,6 +69,20 @@ tunnel-client run --profile computer-connector
 
 The tunnel is outbound-only; no inbound router/firewall port is required. In ChatGPT, add a custom MCP server using **Tunnel** and select/paste the associated `tunnel_id`.
 
+## Health and diagnostics
+
+Computer Connector separates **transport online** from **execution ready**. `list_devices` reports the last-known execution state, while `probe_devices` performs a fresh read-only end-to-end `tools/list` check through the worker and its local Desktop Commander process.
+
+From the controller host:
+
+```sh
+npm run doctor
+```
+
+`doctor` exits non-zero when any registered device is offline or its execution plane is degraded. Worker child crashes/stdout closure trigger a worker connection-generation reset, so the router reinitializes MCP instead of keeping a false healthy session.
+
+The design rationale and public Remote Desktop Commander/Desktop Commander feedback review is in [`docs/remote-desktop-commander-feedback.md`](docs/remote-desktop-commander-feedback.md).
+
 ## Runtime data
 
 Local-only state and secrets stay outside Git:
