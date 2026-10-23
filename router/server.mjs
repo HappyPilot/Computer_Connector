@@ -14,6 +14,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { loadDeviceRegistry } from './devices.mjs';
 import { WorkerHub } from './worker-hub.mjs';
+import { SessionAffinityRegistry } from './session-affinity.mjs';
 import {
   classifyToolResult,
   WCM_ERROR_SEMANTICS,
@@ -54,6 +55,8 @@ const MAX_TOOL_RESULT_BYTES = resolveMaxRouterToolResultBytes(process.env.WC_MAX
 const ROUTER_TRACE_FILE = path.resolve(process.cwd(), 'logs', 'router-trace.log');
 const ROUTER_INSTANCE_ID = randomUUID();
 const registry = loadDeviceRegistry(process.cwd());
+const sessionAffinity = new SessionAffinityRegistry();
+const pendingHostSessions = new Map();
 const SPECIALIZED_CAPABILITIES = [
   'Bundled specialized capabilities (discoverability only; these are helper workflows, not standalone MCP actions):',
   '- Bilibili download: tools\\bilibili-download contains bridge.py for browser-side signed DASH metadata plus a bundled yt-dlp.exe fallback. For authenticated 1080P, prefer the documented BMG logged-in session -> playurl -> WCM/curl -> ffmpeg workflow.',
@@ -294,7 +297,7 @@ function augmentTools(tools) {
   return [
     {
       name: 'list_devices',
-      description: `List Windows Console devices and their online status.\n\n${SPECIALIZED_CAPABILITIES}\n\n${WCM_ERROR_SEMANTICS}`,
+      description: `List Computer Connector devices and their online status.\n\n${SPECIALIZED_CAPABILITIES}\n\n${WCM_ERROR_SEMANTICS}`,
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     },
     ...routed,
@@ -583,7 +586,10 @@ async function dispatchRoutedWorker({
   workerArguments,
   sourcePayload = null,
   requestIdPrefix = 'router',
+  hostSession = null,
 }) {
+  const mismatch = sessionAffinity.check({ deviceId: device.deviceId, toolName, args: workerArguments, hostSession });
+  if (mismatch) return toolResult({ error: mismatch }, true);
   const workerPayload = {
     jsonrpc: '2.0',
     id: requestIdPrefix + '-' + randomUUID(),
@@ -602,6 +608,7 @@ async function dispatchRoutedWorker({
         { deviceOnline: Boolean(hub.connectionInfo(device.deviceId)) },
       );
     }
+    sessionAffinity.record({ deviceId: device.deviceId, toolName, result: message.result, hostSession });
     return classifyToolResult(
       message.result || toolResult({ error: 'Worker returned no tool result.' }, true),
       { deviceOnline: Boolean(hub.connectionInfo(device.deviceId)) },
@@ -730,6 +737,8 @@ async function executeTool(payload, sourcePayload = null) {
         args.approval_nonce,
         hostSession,
       );
+      const actionHostSession = pendingHostSessions.get(args.approval_id) ?? null;
+      pendingHostSessions.delete(args.approval_id);
       const grant = timedGrantManager.grant({
         approvalId: args.approval_id,
         requestedDurationSeconds: claimed.requestedDurationSeconds,
@@ -772,6 +781,11 @@ async function executeTool(payload, sourcePayload = null) {
       };
 
       try {
+        const mismatch = sessionAffinity.check({
+          deviceId: device.deviceId, toolName: claimed.action.toolName,
+          args: claimed.action.workerArguments, hostSession: actionHostSession,
+        });
+        if (mismatch) throw new Error(mismatch);
         const message = await callWorker(device.deviceId, workerPayload, sourcePayload);
         const consumed = pendingActionManager.markConsumed(args.approval_id);
         if (message.error) {
@@ -785,6 +799,7 @@ async function executeTool(payload, sourcePayload = null) {
           }));
         }
         const workerResult = message.result || {};
+        sessionAffinity.record({ deviceId: device.deviceId, toolName: claimed.action.toolName, result: workerResult, hostSession: actionHostSession });
         return structuredToolResult(approvalStatus({
           ...base,
           ...consumed,
@@ -845,6 +860,9 @@ async function executeTool(payload, sourcePayload = null) {
     return toolResult({ error: detail, devices: hub.listStatus() }, true);
   }
 
+  const hostSession = hostSessionFor(payload, sourcePayload);
+  const mismatch = sessionAffinity.check({ deviceId, toolName, args, hostSession });
+  if (mismatch) return toolResult({ error: mismatch }, true);
   const policy = refreshApprovalPolicy();
   const workerArguments = mapPathArguments(stripDeviceRoutingArguments(args), device);
   if (policy.mode === 'timed') {
@@ -859,7 +877,12 @@ async function executeTool(payload, sourcePayload = null) {
         workerArguments,
         sourcePayload,
         requestIdPrefix: 'grant',
+        hostSession,
       });
+    }
+    // Retain the originating session across the separate approval UI calls.
+    for (const id of pendingHostSessions.keys()) {
+      if (pendingActionManager.lookup(id)?.state !== 'pending') pendingHostSessions.delete(id);
     }
     const pending = pendingActionManager.ensurePending({
       deviceId: device.deviceId,
@@ -867,6 +890,7 @@ async function executeTool(payload, sourcePayload = null) {
       workerArguments,
       summary: toolName + ' on ' + device.deviceId,
     });
+    pendingHostSessions.set(pending.request.approval_id, hostSession);
     return approvalPendingResult(pending, {
       deviceId: device.deviceId,
       toolName,
@@ -878,6 +902,7 @@ async function executeTool(payload, sourcePayload = null) {
     workerArguments: stripDeviceRoutingArguments(args),
     sourcePayload,
     requestIdPrefix: 'direct',
+    hostSession,
   });
 }
 function sdkInstructions() {
@@ -1037,7 +1062,7 @@ async function start() {
     server.listen(ROUTER_PORT, ROUTER_HOST);
   });
   pingTimer = setInterval(() => hub.pingAll(), 15000);
-  console.log('Windows Console router listening on ' + ROUTER_HOST + ':' + ROUTER_PORT + '.');
+  console.log('Computer Connector router listening on ' + ROUTER_HOST + ':' + ROUTER_PORT + '.');
   console.log('Worker hub listening on ' + WORKER_HOST + ':' + WORKER_PORT + '.');
 }
 

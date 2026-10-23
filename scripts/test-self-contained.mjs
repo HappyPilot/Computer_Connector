@@ -171,6 +171,55 @@ async function testWorkerHeartbeat() {
   assert.equal(hub.connectionInfo(device.deviceId), null);
   await hub.stop();
 }
+async function testRemoteWorkerAuthentication() {
+  const token = 'u'.repeat(32);
+  const wrongToken = 'v'.repeat(32);
+  const good = {
+    deviceId: 'remote-good', name: 'remote-good', enabled: true, local: false,
+    token, allowedIps: Object.freeze(['127.0.0.1']),
+  };
+  const badIp = {
+    deviceId: 'remote-bad-ip', name: 'remote-bad-ip', enabled: true, local: false,
+    token, allowedIps: Object.freeze(['127.0.0.2']),
+  };
+  const devices = [good, badIp];
+  const registry = { devices, get: (id) => devices.find((device) => device.deviceId === id) || null };
+  const hub = new WorkerHub({
+    registry,
+    host: '127.0.0.1',
+    port: 0,
+    remoteHost: '127.0.0.1',
+    remotePort: 0,
+    logger: { log() {}, error() {} },
+  });
+  await hub.start();
+  const port = hub.remoteServer.address().port;
+
+  async function rejected(deviceId, suppliedToken) {
+    const socket = net.createConnection({ host: '127.0.0.1', port });
+    socket.on('error', () => {});
+    await once(socket, 'connect');
+    const closed = once(socket, 'close');
+    socket.write(JSON.stringify({ type: 'hello', deviceId, name: deviceId, token: suppliedToken }) + '\n');
+    await closed;
+    assert.equal(hub.connectionInfo(deviceId), null);
+  }
+
+  await rejected(good.deviceId, wrongToken);
+  await rejected(badIp.deviceId, token);
+
+  const socket = net.createConnection({ host: '127.0.0.1', port });
+  socket.on('error', () => {});
+  await once(socket, 'connect');
+  const ack = waitForLine(socket, (frame) => frame.type === 'hello_ack');
+  socket.write(JSON.stringify({ type: 'hello', deviceId: good.deviceId, name: good.name, token }) + '\n');
+  await ack;
+  assert.equal(hub.connectionInfo(good.deviceId)?.transport, 'remote');
+
+  socket.destroy();
+  await hub.stop();
+}
+
 function collectFrames(socket) {
   const frames = [];
   let buffer = '';
@@ -227,6 +276,7 @@ lines.on('line', (line) => {
     'WC_DEVICE_NAME=test-agent',
     'WC_CONTROLLER_HOST=127.0.0.1',
     `WC_CONTROLLER_PORT=${port}`,
+    `WC_WORKER_TOKEN=${'r'.repeat(32)}`,
     `WC_DC_NODE=${process.execPath}`,
     `WC_DC_SCRIPT=${fakeDc}`,
     'WC_RECONNECT_MS=30',
@@ -306,7 +356,7 @@ function testServerInfo() {
   );
   assert.equal(serverInfo.name, packageInfo.name);
   assert.equal(serverInfo.version, packageInfo.version);
-  assert.equal(routerClientInfo.name, 'windows-console-router');
+  assert.equal(routerClientInfo.name, 'computer-connector-router');
   assert.equal(routerClientInfo.version, packageInfo.version);
 }
 
@@ -357,10 +407,12 @@ async function main() {
     testServerInfo();
     await testConfigAndOAuth();
     await testWorkerHeartbeat();
+    await testRemoteWorkerAuthentication();
     await testWorkerReconnectIsolation();
     console.log('WCM self-contained tests: PASS');
     console.log('oauth_prune_and_cap=PASS');
     console.log('worker_heartbeat=PASS');
+    console.log('remote_worker_token_ip_auth=PASS');
     console.log('worker_reconnect_isolation=PASS');
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });

@@ -2,7 +2,7 @@
 param()
 $ErrorActionPreference='SilentlyContinue'
 $repoRoot=Split-Path -Parent $PSScriptRoot
-Write-Output '=== Windows Console local ==='
+Write-Output '=== Computer Connector local ==='
 Get-NetTCPConnection -State Listen -LocalPort 18008,18009,18100,18101 |
     Select-Object LocalAddress,LocalPort,OwningProcess |
     Sort-Object LocalPort |

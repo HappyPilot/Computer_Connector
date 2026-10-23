@@ -71,7 +71,7 @@ export class WorkerHub {
     this.localServer.on('error', (error) => this.logger.error('Local worker hub error:', error.message));
     await listen(this.localServer, this.port, this.host);
     if (this.remoteHost) {
-      this.remoteServer = net.createServer((socket) => this.#accept(socket, 'tailscale'));
+      this.remoteServer = net.createServer((socket) => this.#accept(socket, 'remote'));
       this.remoteServer.on('error', (error) => this.logger.error('Remote worker hub error:', error.message));
       try {
         await listen(this.remoteServer, this.remotePort, this.remoteHost);
@@ -133,8 +133,8 @@ export class WorkerHub {
     if (device.local) {
       if (state.transport !== 'local' || !equalToken(frame.token, device.token)) return false;
     } else {
-      if (state.transport !== 'tailscale') return false;
-      if (!device.tailscaleIp || state.sourceIp !== device.tailscaleIp) return false;
+      if (state.transport !== 'remote' || !equalToken(frame.token, device.token)) return false;
+      if (!device.allowedIps?.includes(state.sourceIp)) return false;
     }
 
     const existing = this.connections.get(device.deviceId);

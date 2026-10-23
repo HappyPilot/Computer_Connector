@@ -87,9 +87,9 @@ try {
             Remove-Item (Join-Path $stateDir 'rdc-upstream-session.json') -Force -ErrorAction SilentlyContinue
             $routerProc = StartHidden $node "`"$router`""
             Set-Content (Join-Path $stateDir 'rdc-router.pid') $routerProc.Id -Encoding ASCII
-            if(-not (WaitPort 18009 20)){ throw 'Windows Console router did not listen on 18009.' }
+            if(-not (WaitPort 18009 20)){ throw 'Computer Connector router did not listen on 18009.' }
             if(-not (WaitPort 18101 10)){ throw 'Worker hub did not listen on 18101.' }
-            if(-not (WaitPort 18100 10)){ throw 'Remote Tailscale worker hub did not listen on 18100.' }
+            if(-not (WaitPort 18100 10)){ throw 'Remote private worker hub did not listen on 18100.' }
             $workerProc = StartHidden $node "`"$worker`" `"$workerEnv`""
             Set-Content $workerPidFile $workerProc.Id -Encoding ASCII
             if(-not (WaitLocalWorker 20)){ throw "Local worker $localDeviceId did not register with the router." }

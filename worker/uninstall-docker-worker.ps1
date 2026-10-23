@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$ContainerName='windows-console-worker')
+param([string]$ContainerName='computer-connector-worker')
 $ErrorActionPreference='Stop'
 $docker=(Get-Command docker.exe -CommandType Application -ErrorAction Stop).Source
 $existing=& $docker ps -a --filter "name=^/$ContainerName$" --format '{{.Names}}'

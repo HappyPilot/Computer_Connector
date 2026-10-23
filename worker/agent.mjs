@@ -41,7 +41,7 @@ const maxDcResponseBytes = resolveMaxDcResponseBytes(env.WC_MAX_DC_RESPONSE_BYTE
 if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(deviceId)) throw new Error('Invalid WC_DEVICE_ID.');
 if (!controllerHost) throw new Error('WC_CONTROLLER_HOST is required.');
 if (!Number.isInteger(controllerPort) || controllerPort < 1 || controllerPort > 65535) throw new Error('Invalid WC_CONTROLLER_PORT.');
-if (workerToken && workerToken.length < 32) throw new Error('WC_WORKER_TOKEN is too short.');
+if (workerToken.length < 32 || workerToken.length > 512) throw new Error('WC_WORKER_TOKEN must be 32-512 characters.');
 if (!dcScript || !fs.existsSync(dcScript)) throw new Error('WC_DC_SCRIPT was not found: ' + dcScript);
 
 let child = null;

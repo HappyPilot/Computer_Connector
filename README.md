@@ -1,50 +1,77 @@
-# Windows Console MCP
+# Computer Connector
 
-Self-hosted multi-device Windows MCP controller for ChatGPT.
-
-One controller owns the public OAuth/Funnel endpoint. Local and remote workers expose Desktop Commander through the controller with an explicit `deviceId` on every routed worker tool call.
+Self-hosted, multi-device computer-control MCP for ChatGPT on **macOS, Linux, and Windows**. It reuses the MIT-licensed Windows Console MCP/Desktop Commander stack, removes the hosted Remote Desktop Commander relay dependency, and requires an explicit `deviceId` for routed worker actions.
 
 ## Architecture
 
 ```text
 ChatGPT
   |
-  | OAuth + MCP
+  | OpenAI Secure MCP Tunnel (outbound HTTPS only)
   v
-Tailscale Funnel /rdc/mcp
+tunnel-client
   |
+  | http://127.0.0.1:18009/mcp
   v
-Controller
-  |- OAuth sidecar        127.0.0.1:18008
+Computer Connector controller
   |- MCP router           127.0.0.1:18009
   |- Local worker hub     127.0.0.1:18101
-  |- local worker         deviceId=local-pc
-  `- Remote worker hub    <Tailscale IPv4>:18100
-       `- remote workers  deviceId=remote-worker, ...
+  `- Private worker hub   LAN/Tailscale:18100
+       |- macOS worker
+       |- Linux worker
+       `- Windows worker
 ```
 
-The public `/rdc/mcp` endpoint uses the MCP SDK `StreamableHTTPServerTransport`, matching CCM's standard initialize/session lifecycle.
+Each worker runs the existing Desktop Commander execution engine. The controller adds explicit device routing, approval policy, reconnect/offline handling, result guards, and process/search **device affinity** so a PID or search-session follow-up cannot silently cross to the wrong host.
 
-## MCP identity icon
+## Private quick start
 
-WCM has a dedicated, public PNG endpoint at `/rdc/icon.png` on the same HTTPS origin as the protected `/rdc/mcp` endpoint. The sidecar serves only the fixed repository asset `assets/wcm-icon.png` (GET and HEAD, no OAuth needed); it does **not** expose a general file server. The MCP `initialize.serverInfo` includes the icon's absolute HTTPS URL and its actual dimensions only when the PNG exists and passes basic file checks. With no image installed, icon metadata is omitted rather than advertising a broken link. The server display title is `Windows Console MCP`.
+Requirements: Node.js **22.12+** (required by Desktop Commander 0.3.1), a local `config/devices.json`, and at least one worker.
 
-The full-resolution icon is [`assets/wcm-icon.png`](assets/wcm-icon.png), an approved transparent **512 x 512 PNG** generated through CPA ImgGen. Its canonical generation brief is [`assets/ICON_PROMPT.txt`](assets/ICON_PROMPT.txt). To regenerate the full-resolution icon, use the CPA ImgGen client's local mode on the registered CPA worker (which securely retrieves its local client credentials), or provide `CPA_BASE_URL` and `CPA_API_KEY` through a secure environment for remote mode. Never commit credentials or generation candidates. The endpoint returns 404 if the full-resolution icon is unavailable.
-
-**ChatGPT plugin icon setup:** Actual plugin creation requires **manual image upload**, and the image must be **under 10 KB**. Use [`assets/wcm-plugin-icon.png`](assets/wcm-plugin-icon.png): an independently reviewed, transparent **128 x 128 PNG (4,139 bytes)** derived from the approved WCM icon. This is the file to download and select in ChatGPT's plugin-creation icon upload field; do **not** upload the 147 KB full-resolution PNG. When the source icon changes, regenerate the upload PNG using `scripts/build-plugin-icon.py` (requires Python and Pillow); the script targets at most 9,000 bytes to leave margin beneath the UI limit, and `scripts/test-icon.mjs` verifies the output. **The plugin-creation interface does not automatically import the `initialize.serverInfo.icons` URL.**
-
-The Tailscale Funnel is configured with **exact path mappings**, so apply the updated `scripts/configure-rdc-funnel.ps1` route configuration when deploying the full-resolution icon. The route list includes `/rdc/icon.png`; its removal counterpart is `scripts/disable-rdc-funnel.ps1`. Deploying a changed server-provided icon also requires restarting the Controller Router and sidecar using the supervised lifecycle so new MCP sessions advertise it. This URL is available to MCP clients supporting server icon metadata, **not as a replacement for ChatGPT's required manual plugin icon upload**.
-
-## Controller setup
-
-```powershell
+```sh
 npm install
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\rdc-enable-oauth.ps1 `
-  -PublicBaseUrl https://your-machine.your-tailnet.ts.net
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-rdc-autostart.ps1
+npm run start:private
 ```
 
-Runtime configuration is intentionally local-only:
+That starts the loopback MCP router and local worker hub (`127.0.0.1:18101`). To accept workers from another machine, bind the separate remote worker hub to a **specific private controller address** (LAN or Tailscale), not the public internet:
+
+```sh
+WC_WORKER_REMOTE_HOST=<controller-private-ip> \
+WC_WORKER_REMOTE_PORT=18100 \
+npm run start:private
+```
+
+Every worker uses its own 32–512 character token. A remote device entry must set `local: false`, the same `token`, and `allowedIps` containing the worker's expected source LAN and/or Tailscale IP. Legacy `tailscaleIp` remains accepted as a single-IP compatibility alias. Same-machine workers use `local: true`, their token, controller host `127.0.0.1`, and port `18101`.
+
+The MCP endpoint is then:
+
+```text
+http://127.0.0.1:18009/mcp
+```
+
+Workers are configured separately. See [`worker/README.md`](worker/README.md) for macOS LaunchAgent, Linux systemd user-service, and Windows native-worker setup.
+
+## ChatGPT through Secure MCP Tunnel
+
+Create a tunnel in OpenAI Platform and use the official `tunnel-client` from the latest public release. Keep credentials out of Git and shell history where possible.
+
+```sh
+export CONTROL_PLANE_API_KEY="<runtime-api-key>"
+
+tunnel-client init \
+  --profile computer-connector \
+  --tunnel-id <tunnel_id> \
+  --mcp-server-url http://127.0.0.1:18009/mcp
+
+tunnel-client doctor --profile computer-connector --explain
+tunnel-client run --profile computer-connector
+```
+
+The tunnel is outbound-only; no inbound router/firewall port is required. In ChatGPT, add a custom MCP server using **Tunnel** and select/paste the associated `tunnel_id`.
+
+## Runtime data
+
+Local-only state and secrets stay outside Git:
 
 ```text
 config/rdc.env
@@ -54,13 +81,21 @@ config/worker-*.env
 logs/
 ```
 
-`config/devices.json.example` shows the registry format. Local workers use a local token. Remote workers are bound to their registered Tailscale IPv4 and are accepted only on the controller's Tailscale-bound TCP listener.
+`config/devices.json.example` documents the device registry. Remote workers should be reachable only through a trusted private network such as LAN/Tailscale.
+
+## Compatibility mode
+
+The original OAuth + Tailscale Funnel sidecar remains available for deployments that need a public HTTPS MCP endpoint. The private Secure MCP Tunnel path is the preferred ChatGPT deployment for this project.
+
+## MCP identity icon
+
+The compatibility sidecar can still serve `assets/wcm-icon.png` and `assets/wcm-plugin-icon.png`; the latter remains suitable for manual ChatGPT plugin icon upload.
 
 ## Remote workers
 
-Remote workers do not run OAuth or Funnel. They connect directly to the Controller's Tailscale-bound worker hub.
+Remote workers do not run OAuth or Funnel. They connect directly to the Controller's private worker hub over LAN or Tailscale. Admission requires both the registered worker token and a matching source IP from `allowedIps`; bind `WC_WORKER_REMOTE_HOST` only to a trusted private interface.
 
-Windows remote workers can run natively with Node.js 20+ or in the existing Docker deployment. The native deployment uses the same `worker/agent.mjs` runtime as the Controller host, wrapped by a dedicated per-device Scheduled Task and supervisor; no worker protocol fork is involved.
+Windows remote workers can run natively with Node.js 22.12+ or in the existing Docker deployment. macOS and Linux use the same `worker/agent.mjs` through the supplied LaunchAgent/systemd templates. No worker protocol fork is involved.
 
 See [`worker/README.md`](worker/README.md) for native install/status/uninstall and Docker deployment details.
 
@@ -154,7 +189,7 @@ When a live WCM deployment behaves differently from the checked-out code, debug 
 
 ## Security
 
-WCM can execute commands and access files on registered devices. Expose only the OAuth-protected sidecar through your HTTPS ingress; keep the router and worker hubs private to localhost/Tailscale. Remote worker admission relies on the registered Tailscale source IP, so treat your tailnet and `config/devices.json` as part of the trust boundary.
+Computer Connector can execute commands and access files on registered devices. Keep the MCP Router loopback-only when using Secure MCP Tunnel, and bind the remote worker hub only to a trusted private LAN or Tailscale interface. Remote worker admission requires both a timing-safe token match and a source IP listed in `allowedIps`; treat `config/devices.json`, worker env files, the private network and the host accounts as part of the trust boundary. The worker TCP protocol itself is not TLS-encrypted, so prefer Tailscale when the underlying LAN is not fully trusted.
 
 The owner action is frozen server-side before the card is shown. The one-time approval nonce is delivered only in the tool result `_meta`, compared timing-safely, bound to the Host session when available, and never accepted as a replacement for the frozen action. Unbound action validity, bound-card validity, and post-approval grant duration are separate clocks. Pending approvals, retained terminal approval/grant state, and active grants are memory-only and are cleared by Router restart.
 

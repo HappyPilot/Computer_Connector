@@ -32,8 +32,8 @@ async function test() {
   fs.writeFileSync(iconFile, png);
   assert.deepEqual(readIconPng(iconFile), png);
   const info = createServerInfo({ resource, iconFile });
-  assert.equal(info.name, 'windows-console-mcp');
-  assert.equal(info.title, 'Windows Console MCP');
+  assert.equal(info.name, 'computer-connector');
+  assert.equal(info.title, 'Computer Connector');
   assert.equal(createServerInfo({ resource: 'http://wcm.example.com/rdc/mcp', iconFile }).icons, undefined);
   assert.deepEqual(info.icons, [{
     src: 'https://wcm.example.com/rdc/icon.png',

@@ -1,23 +1,31 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
+import { isIP } from 'node:net';
 
 const DEVICE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
-const TAILSCALE_IPV4_RE = /^100\.(?:6[4-9]|[78]\d|9\d|1[01]\d|12[0-7])(?:\.\d{1,3}){2}$/u;
 
-function optionalToken(value, deviceId, required) {
+function requireToken(value, deviceId) {
   const token = String(value || '');
-  if (!required && !token) return '';
   if (token.length < 32 || token.length > 512) {
     throw new Error('Device ' + deviceId + ' token must be 32-512 characters.');
   }
   return token;
 }
 
-function requireTailscaleIp(value, deviceId) {
-  const ip = String(value || '').trim();
-  if (!TAILSCALE_IPV4_RE.test(ip)) throw new Error('Device ' + deviceId + ' requires a Tailscale IPv4 address.');
-  return ip;
+function normalizeAllowedIps(item, deviceId, local) {
+  if (local) return Object.freeze([]);
+  let value = item?.allowedIps;
+  if (value == null && item?.allowedIp != null) value = [item.allowedIp];
+  if (value == null && item?.tailscaleIp != null) value = [item.tailscaleIp];
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error('Remote device ' + deviceId + ' requires allowedIps (legacy tailscaleIp is also accepted).');
+  }
+  const ips = [...new Set(value.map((entry) => String(entry || '').trim()))];
+  if (ips.some((ip) => !isIP(ip))) {
+    throw new Error('Remote device ' + deviceId + ' allowedIps must contain valid IP addresses.');
+  }
+  return Object.freeze(ips);
 }
 
 function normalizePathMappings(value, deviceId) {
@@ -66,8 +74,10 @@ export function loadDeviceRegistry(rootDir = process.cwd()) {
       name: String(item?.name || deviceId),
       enabled: item?.enabled !== false,
       local,
-      token: optionalToken(item?.token, deviceId, local),
-      tailscaleIp: local ? '' : requireTailscaleIp(item?.tailscaleIp, deviceId),
+      token: requireToken(item?.token, deviceId),
+      allowedIps: normalizeAllowedIps(item, deviceId, local),
+      // Compatibility field for older operational tooling that still reads it.
+      tailscaleIp: local ? '' : String(item?.tailscaleIp || '').trim(),
       pathMappings: normalizePathMappings(item?.pathMappings, deviceId),
       notes: String(item?.notes || ''),
     });

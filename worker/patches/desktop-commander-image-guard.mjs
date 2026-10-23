@@ -11,36 +11,37 @@ const pkgPath = path.join(dcRoot, 'package.json');
 
 if (!fs.existsSync(pkgPath)) throw new Error(`Desktop Commander is not installed at ${dcRoot}.`);
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-if (pkg.version !== '0.2.48') {
-  throw new Error(`Refusing to patch unsupported Desktop Commander ${pkg.version}; expected 0.2.48.`);
+if (pkg.version !== '0.3.1') {
+  throw new Error(`Refusing to patch unsupported Desktop Commander ${pkg.version}; expected 0.3.1.`);
 }
 
 const imageFile = path.join(dcRoot, 'dist', 'utils', 'files', 'image.js');
 const factoryFile = path.join(dcRoot, 'dist', 'utils', 'files', 'factory.js');
 const stdioFile = path.join(dcRoot, 'dist', 'custom-stdio.js');
 
-const imageSource = `/** WCM_IMAGE_GUARD_V1 */
+const imageSource = `/** WCM_IMAGE_GUARD_V2 */
 import fs from "fs/promises";
 import sharp from "sharp";
-import { fileTypeFromFile } from "file-type";
 
+const SVG_MIME_TYPE = 'image/svg+xml';
 const MAX_INLINE_IMAGE_BYTES = Number.parseInt(process.env.DESKTOP_COMMANDER_MAX_INLINE_IMAGE_BYTES || '65536', 10);
 const MAX_IMAGE_PIXELS = Number.parseInt(process.env.DESKTOP_COMMANDER_MAX_IMAGE_PIXELS || '100000000', 10);
 const PREVIEW_WIDTHS = [1600, 1200, 900, 640, 480, 320];
 const PREVIEW_QUALITIES = [76, 70, 64, 58, 52, 46];
+
+export function isImageAnswer(mimeType, svgAsImage = false) {
+  const type = String(mimeType || '').toLowerCase().split(';')[0].trim();
+  return type.startsWith('image/') && (svgAsImage || type !== SVG_MIME_TYPE);
+}
+
 export class ImageFileHandler {
-  canHandle(filePath) {
-    const lowerPath = filePath.toLowerCase();
-    return ImageFileHandler.IMAGE_EXTENSIONS.some(ext => lowerPath.endsWith(ext));
+  canHandle(filePath, options) {
+    return isImageAnswer(this.getMimeType(filePath), options?.svgAsImage);
   }
 
-  async probe(filePath) {
-    const lowerPath = filePath.toLowerCase();
-    const isSvg = lowerPath.endsWith('.svg');
-    let detected = null;
-    try { detected = await fileTypeFromFile(filePath); } catch {}
-    if (!isSvg && (!detected || !String(detected.mime || '').startsWith('image/'))) {
-      return { valid: false, reason: 'image extension does not match file signature' };
+  async probe(filePath, options) {
+    if (!this.canHandle(filePath, options)) {
+      return { valid: false, reason: 'file is not an image for this read mode' };
     }
     try {
       const metadata = await sharp(filePath, { animated: false, limitInputPixels: MAX_IMAGE_PIXELS }).metadata();
@@ -48,13 +49,14 @@ export class ImageFileHandler {
       const height = Number(metadata.height || 0);
       if (!width || !height) return { valid: false, reason: 'image dimensions could not be decoded' };
       if (width * height > MAX_IMAGE_PIXELS) return { valid: false, reason: 'image exceeds pixel safety limit' };
-      return { valid: true, mimeType: detected?.mime || this.getMimeType(filePath), width, height };
+      return { valid: true, mimeType: this.getMimeType(filePath), width, height };
     } catch (error) {
       return { valid: false, reason: 'image decode failed: ' + (error?.message || String(error)) };
     }
   }
 
-  async read(filePath, options) {    const probe = await this.probe(filePath);
+  async read(filePath, options) {
+    const probe = await this.probe(filePath, options);
     if (!probe.valid) {
       return {
         content: 'File has an image extension but is not a valid decodable image. Use start_process for binary analysis. Reason: ' + probe.reason,
@@ -82,7 +84,8 @@ export class ImageFileHandler {
     }
     if (!preview || preview.length > MAX_INLINE_IMAGE_BYTES) {
       return {
-        content: 'Valid image omitted because a safe inline preview could not be produced. Use start_process for local image processing.',        mimeType: 'text/plain',
+        content: 'Valid image omitted because a safe inline preview could not be produced. Use start_process for local image processing.',
+        mimeType: 'text/plain',
         metadata: { isImage: false, imageTooLarge: true, originalSize: stats.size }
       };
     }
@@ -101,7 +104,8 @@ export class ImageFileHandler {
     };
   }
 
-  async write(filePath, content) {
+  async write(filePath, content, mode) {
+    if (mode === 'append') throw new Error('Image append not supported.');
     const buffer = typeof content === 'string' ? Buffer.from(content, 'base64') : content;
     await fs.writeFile(filePath, buffer);
   }
@@ -112,7 +116,8 @@ export class ImageFileHandler {
       size: stats.size,
       created: stats.birthtime,
       modified: stats.mtime,
-      accessed: stats.atime,      isDirectory: stats.isDirectory(),
+      accessed: stats.atime,
+      isDirectory: stats.isDirectory(),
       isFile: stats.isFile(),
       permissions: stats.mode.toString(8).slice(-3),
       fileType: 'image',
@@ -129,7 +134,6 @@ export class ImageFileHandler {
   }
 }
 
-ImageFileHandler.IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
 ImageFileHandler.IMAGE_MIME_TYPES = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.svg': 'image/svg+xml'
@@ -139,12 +143,10 @@ ImageFileHandler.IMAGE_MIME_TYPES = {
 fs.writeFileSync(imageFile, imageSource, 'utf8');
 
 let factory = fs.readFileSync(factoryFile, 'utf8');
-const oldFactoryBlock = `    // Check Image (extension-based, sync - images are binary but handled specially)\n    if (getImageHandler().canHandle(filePath)) {\n        return getImageHandler();\n    }`;
-const newFactoryBlock = `    // WCM_IMAGE_GUARD_V1: extension is only a candidate; verify signature + decoder first.\n    if (getImageHandler().canHandle(filePath)) {\n        const probe = await getImageHandler().probe(filePath);        if (probe.valid) return getImageHandler();
-        return getBinaryHandler();
-    }`;
+const oldFactoryBlock = `    // Check Image (extension-based, sync - images are binary but handled specially)\n    if (getImageHandler().canHandle(filePath, options)) {\n        return getImageHandler();\n    }`;
+const newFactoryBlock = `    // WCM_IMAGE_GUARD_V2: extension is only a candidate; verify decoder and pixel bounds first.\n    if (getImageHandler().canHandle(filePath, options)) {\n        const probe = await getImageHandler().probe(filePath, options);\n        if (probe.valid) return getImageHandler();\n        return getBinaryHandler();\n    }`;
 
-if (!factory.includes('WCM_IMAGE_GUARD_V1')) {
+if (!factory.includes('WCM_IMAGE_GUARD_V2')) {
   if (!factory.includes(oldFactoryBlock)) throw new Error('factory.js layout changed; refusing unsafe patch.');
   factory = factory.replace(oldFactoryBlock, newFactoryBlock);
   fs.writeFileSync(factoryFile, factory, 'utf8');

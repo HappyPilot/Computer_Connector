@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$DeviceId,
     [Parameter(Mandatory=$true)][string]$ControllerHost,
+    [Parameter(Mandatory=$true)][string]$WorkerToken,
     [int]$ControllerPort=18100,
     [string]$DeviceName='',
     [string]$TaskName='',
@@ -12,6 +13,7 @@ if($DeviceId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'){ throw 'Invalid Devi
 if(-not $ControllerHost.Trim()){ throw 'ControllerHost is required.' }
 if($ControllerHost -match '[\r\n\t ]'){ throw 'ControllerHost must be a single hostname or IP address without whitespace.' }
 if($ControllerPort -lt 1 -or $ControllerPort -gt 65535){ throw 'Invalid ControllerPort.' }
+if($WorkerToken.Length -lt 32 -or $WorkerToken.Length -gt 512 -or $WorkerToken -match '[\r\n]'){ throw 'WorkerToken must be 32-512 characters without line breaks.' }
 if($ConnectTimeoutSeconds -lt 1 -or $ConnectTimeoutSeconds -gt 300){ throw 'ConnectTimeoutSeconds must be between 1 and 300.' }
 $workerDir=$PSScriptRoot
 $repoRoot=Split-Path -Parent $workerDir
@@ -22,21 +24,12 @@ $agent=Join-Path $workerDir 'agent.mjs'
 $uninstaller=Join-Path $workerDir 'uninstall-native-worker.ps1'
 if(-not $DeviceName){ $DeviceName=$env:COMPUTERNAME; if(-not $DeviceName){ $DeviceName=$DeviceId } }
 if($DeviceName -match '[\r\n]'){ throw 'DeviceName must not contain line breaks.' }
-if(-not $TaskName){ $TaskName="Windows Console Native Worker - $DeviceId" }
+if(-not $TaskName){ $TaskName="Computer Connector Native Worker - $DeviceId" }
 
 $node=(Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $npm=(Get-Command npm.cmd -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
-$nodeMajor=[int]((& $node -p "process.versions.node.split('.')[0]").Trim())
-if($nodeMajor -lt 20){ throw "Node.js 20 or newer is required; found major version $nodeMajor." }
-$tailscale=(Get-Command tailscale.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-if(-not $tailscale){
-    $candidate=Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
-    if(Test-Path -LiteralPath $candidate){ $tailscale=$candidate }
-}
-if(-not $tailscale){ throw 'Tailscale is required for a remote native worker.' }
-$tailIp=[string](& $tailscale ip -4 2>$null | Select-Object -First 1)
-$tailIp=$tailIp.Trim()
-if(-not $tailIp){ throw 'Tailscale IPv4 was unavailable.' }
+$nodeVersion=[version]((& $node -p "process.versions.node").Trim())
+if($nodeVersion -lt [version]'22.12.0'){ throw "Node.js 22.12.0 or newer is required; found $nodeVersion." }
 foreach($file in @($supervisor,$agent,$uninstaller,(Join-Path $workerDir 'package-lock.json'))){ if(-not (Test-Path -LiteralPath $file)){ throw "Missing worker file: $file" } }
 
 $safeId=$DeviceId -replace '[^A-Za-z0-9._-]','-'
@@ -62,6 +55,7 @@ $envText=@(
     "WC_DEVICE_NAME=$DeviceName"
     "WC_CONTROLLER_HOST=$ControllerHost"
     "WC_CONTROLLER_PORT=$ControllerPort"
+    "WC_WORKER_TOKEN=$WorkerToken"
     "WC_DC_NODE=$node"
     "WC_DC_SCRIPT=$dc"
     'WC_RECONNECT_MS=3000'
@@ -111,6 +105,6 @@ for($i=0;$i -lt $ConnectTimeoutSeconds;$i++){
 $task=Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 if($task.State -ne 'Running'){ throw "Native worker task is not running; state=$($task.State)." }
 if(-not $connected){ throw "Native worker task is running but Controller connection was not confirmed within $ConnectTimeoutSeconds seconds. Use status-native-worker.ps1 for logs." }
-Write-Output ("Native worker template installed. Device={0}; task={1}; TailscaleIPv4={2}" -f $DeviceId,$TaskName,$tailIp)
+Write-Output ("Native worker template installed. Device={0}; task={1}" -f $DeviceId,$TaskName)
 Write-Output ("Environment: " + $envFile)
 Write-Output 'Verify the device from the Controller with list_devices before removing any previous worker.'

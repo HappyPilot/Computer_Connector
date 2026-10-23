@@ -1,0 +1,18 @@
+[Unit]
+Description=Computer Connector worker (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Install this as a user unit. Run only as the logged-in account; do not enable
+# lingering or grant extra privileges unless your deployment specifically needs it.
+ExecStart=/usr/bin/node %h/computer-connector/worker/agent.mjs %h/.config/computer-connector/%i.env
+Restart=on-failure
+RestartSec=3s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

@@ -49,7 +49,7 @@ async function getAccessToken(approvalSecret) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      client_name: 'Windows Console SDK E2E',
+      client_name: 'Computer Connector SDK E2E',
       redirect_uris: [redirectUri],
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],

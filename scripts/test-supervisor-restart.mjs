@@ -9,7 +9,20 @@ const quote = (value) => `'${value.replaceAll("'", "''")}'`;
 const supervisor = path.join(root, 'scripts', 'rdc-supervisor.ps1');
 const helper = path.join(root, 'scripts', 'wcm-supervisor-restart.ps1');
 
-test('Supervisor restart handler parses and consumes only fixed signals', () => {
+function findPowerShell() {
+  for (const command of ['powershell.exe', 'pwsh']) {
+    const probe = spawnSync(command, ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'], { encoding: 'utf8' });
+    if (!probe.error && probe.status === 0) return command;
+  }
+  return null;
+}
+
+test('Supervisor restart handler parses and consumes only fixed signals', (t) => {
+  const powerShell = findPowerShell();
+  if (!powerShell) {
+    t.skip('PowerShell is unavailable on this host; Windows supervisor contract is covered on PowerShell-capable hosts.');
+    return;
+  }
   fs.mkdirSync(path.join(root, '.state'), { recursive: true });
   const stateDir = fs.mkdtempSync(path.join(root, '.state', 'test-supervisor-'));
   try {
@@ -45,7 +58,7 @@ Remove-WcmHeartbeat
 if (Test-Path -LiteralPath $wcmHeartbeat) { throw 'Heartbeat not cleared' }
 Write-Output 'Supervisor signal contract: PASS'
 `;
-    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    const result = spawnSync(powerShell, ['-NoProfile', '-NonInteractive', '-Command', script], {
       encoding: 'utf8', timeout: 20_000,
     });
     assert.equal(result.status, 0, `Supervisor helper test failed: ${result.stderr}\n${result.stdout}`);

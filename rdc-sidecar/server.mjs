@@ -185,9 +185,9 @@ function renderConsentPage(request) {
   if (request.state) fields.push(['state', request.state]);
   const hiddenFields = fields.map(([name, value]) => '<input type="hidden" name="' + escapeHtml(name) + '" value="' + escapeHtml(value) + '">').join('');
   const clientLabel = request.clientName ? '<p>Requested by: ' + escapeHtml(request.clientName) + '</p>' : '';
-  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Windows Console MCP authorization</title></head><body>' +
-    '<main><h1>Windows Console MCP authorization</h1>' + clientLabel +
-    '<p>Enter the local approval secret to allow this client to access the Windows Console MCP tools.</p>' +
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Computer Connector authorization</title></head><body>' +
+    '<main><h1>Computer Connector authorization</h1>' + clientLabel +
+    '<p>Enter the local approval secret to allow this client to access the Computer Connector tools.</p>' +
     '<form method="post" action="' + CONSENT_PATH + '">' + hiddenFields +
     '<label>Approval secret <input name="approval_secret" type="password" autocomplete="off" required></label>' +
     '<button type="submit">Approve and continue</button></form></main></body></html>';

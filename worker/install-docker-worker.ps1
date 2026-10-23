@@ -2,13 +2,15 @@
 param(
     [Parameter(Mandatory=$true)][string]$DeviceId,
     [Parameter(Mandatory=$true)][string]$ControllerHost,
+    [Parameter(Mandatory=$true)][string]$WorkerToken,
     [int]$ControllerPort=18100,
     [string]$DeviceName='',
     [string]$WorkspaceRoot='',
-    [string]$ContainerName='windows-console-worker',
+    [string]$ContainerName='computer-connector-worker',
     [string]$Image='node:22.23.2-bookworm'
 )
 $ErrorActionPreference='Stop'
+if($WorkerToken.Length -lt 32 -or $WorkerToken.Length -gt 512 -or $WorkerToken -match '[\r\n]'){ throw 'WorkerToken must be 32-512 characters without line breaks.' }
 $workerDir=$PSScriptRoot
 if(-not $DeviceName){ $DeviceName=$env:COMPUTERNAME; if(-not $DeviceName){$DeviceName=$DeviceId} }
 if(-not $WorkspaceRoot){ $WorkspaceRoot=Split-Path -Parent $workerDir }
@@ -34,6 +36,7 @@ $envText=@(
     "WC_DEVICE_NAME=$DeviceName"
     "WC_CONTROLLER_HOST=$ControllerHost"
     "WC_CONTROLLER_PORT=$ControllerPort"
+    "WC_WORKER_TOKEN=$WorkerToken"
     'WC_DC_NODE=/usr/local/bin/node'
     'WC_DC_SCRIPT=/app/node_modules/@wonderwhy-er/desktop-commander/dist/index.js'
     'WC_RECONNECT_MS=3000'

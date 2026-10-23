@@ -14,8 +14,9 @@
       "name": "REMOTE-WORKER",
       "enabled": true,
       "local": false,
-      "tailscaleIp": "100.64.0.2",
-      "notes": "Docker worker; /host read-only and /workspace read-write",
+      "token": "replace-with-a-different-random-token-at-least-32-characters",
+      "allowedIps": ["192.168.1.50", "100.64.0.2"],
+      "notes": "Remote worker; allowlist its LAN and/or Tailscale source IPs",
       "pathMappings": [
         {
           "from": "C:\\",

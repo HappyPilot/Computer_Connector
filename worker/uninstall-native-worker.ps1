@@ -5,7 +5,7 @@ param(
 )
 $ErrorActionPreference='Stop'
 if($DeviceId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'){ throw 'Invalid DeviceId.' }
-if(-not $TaskName){ $TaskName="Windows Console Native Worker - $DeviceId" }
+if(-not $TaskName){ $TaskName="Computer Connector Native Worker - $DeviceId" }
 $workerDir=$PSScriptRoot
 $repoRoot=Split-Path -Parent $workerDir
 $safeId=$DeviceId -replace '[^A-Za-z0-9._-]','-'

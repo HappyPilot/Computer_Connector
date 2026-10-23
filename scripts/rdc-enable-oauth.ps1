@@ -87,7 +87,7 @@ if(-not (Test-Path -LiteralPath $devicesFile)){
     [IO.File]::WriteAllText($workerEnv,$workerLines+"`n",$utf8)
 }
 
-Write-Output 'Windows Console controller local config is ready.'
+Write-Output 'Computer Connector controller local config is ready.'
 Write-Output ('OAuth config: ' + $config)
 Write-Output ('Device registry: ' + $devicesFile)
 Write-Output ('Local worker config: ' + $workerEnv)

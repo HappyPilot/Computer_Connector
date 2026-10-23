@@ -20,7 +20,7 @@ export function createServerInfo({ resource = null, iconFile = MCP_ICON_FILE } =
   const iconPng = iconUrl ? readIconPng(iconFile) : null;
   const info = {
     name: String(packageInfo.name),
-    title: 'Windows Console MCP',
+    title: 'Computer Connector',
     version: String(packageInfo.version),
   };
   if (iconPng) {
@@ -36,6 +36,6 @@ export function createServerInfo({ resource = null, iconFile = MCP_ICON_FILE } =
 export const serverInfo = Object.freeze(createServerInfo({ resource: configuredResource() }));
 
 export const routerClientInfo = Object.freeze({
-  name: 'windows-console-router',
+  name: 'computer-connector-router',
   version: serverInfo.version,
 });

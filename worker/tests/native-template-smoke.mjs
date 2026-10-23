@@ -12,7 +12,9 @@ const supervisor = read('native-worker-supervisor.ps1');
 const uninstall = read('uninstall-native-worker.ps1');
 const status = read('status-native-worker.ps1');
 
-assert.match(install, /Node\.js 20 or newer/u);
+assert.match(install, /Node\.js 22\.12\.0 or newer/u);
+assert.match(install, /WorkerToken/u);
+assert.match(install, /WC_WORKER_TOKEN=\$WorkerToken/u);
 assert.match(install, /Register-ScheduledTask/u);
 assert.match(install, /whoami\.exe/u);
 assert.match(install, /New-ScheduledTaskPrincipal -UserId \$taskUser/u);
