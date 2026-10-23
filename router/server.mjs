@@ -1007,7 +1007,7 @@ async function handleRequest(request, response) {
   if (url.pathname === '/health' && request.method === 'GET') {
     sendJson(response, 200, {
       status: 'ok',
-      service: 'windows-console-router',
+      service: 'computer-connector-router',
       defaultDeviceId: registry.defaultDeviceId,
       devices: hub.listStatus(),
     });
