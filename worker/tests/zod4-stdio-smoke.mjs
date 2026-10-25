@@ -29,6 +29,9 @@ test('worker upgraded Zod keeps Desktop Commander MCP schemas valid on a real st
     }
     const config = await client.callTool({ name: 'get_config', arguments: {} });
     assert.notEqual(config.isError, true);
+    const oversized = await client.callTool({ name: 'get_config', arguments: { extras: Array(2049).fill('x') } });
+    assert.equal(oversized.isError, true, 'oversized array must be denied before Zod parsing');
+    assert.match(JSON.stringify(oversized.content), /Arguments exceed safety limit/);
     const listing = await client.callTool({ name: 'list_directory', arguments: { path: tempHome } });
     assert.notEqual(listing.isError, true);
   } finally {
