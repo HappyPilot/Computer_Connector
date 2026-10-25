@@ -19,3 +19,12 @@ Simply overriding its Zod dependency to 4.6.7 makes npm audit green but breaks t
 Use `npm ci && npm test && npm audit --omit=dev --audit-level=high` in an isolated checkout before deploying to any live worker. Check that rerunning `node scripts/apply-desktop-commander-zod-compat.mjs` is idempotent.
 
 Do not confuse this dependency fix with full command-execution sandboxing; the local controller remains bound to loopback and uses host approval/authorization controls. A major vendor update must be separately reviewed and may remove the need for this adapter.
+
+## Residual DoS hardening
+The upstream Zod 4.6.6 security release addresses large arrays with *explicit* size limits, not unbounded arrays, and the `zod/v3` compatibility API alone does not establish that all legacy validators are bounded. The dependency-audit result is a **version-scanner finding**, not proof of input-safety.
+
+Our pinned postinstall adapter now additionally installs a pre-validation complexity guard at the actual Desktop Commander MCP `CallToolRequestSchema` handler: rejects any array with over 2048 elements, object with over 1024 keys, string with over one million UTF-16 code units, nesting beyond 24 levels, or aggregate visited nodes above 8192. It rejects with an MCP tool error **before** tools parse nested arguments via Zod and before telemetry tracks the call.
+
+Regression invokes the real server with an oversized array under a simple `get_config` call and verifies fail-closed behavior. The guard does not bound JSON parsing costs **before** the MCP handler, all script output or host command execution; host permissions, byte limits, sandboxing and authentication remain separate defenses.
+
+Upstream evidence: https://github.com/colinhacks/zod/pull/6652 and https://github.com/advisories/GHSA-mrhx-c7xc-m3w5. Independent cross-tenant and large-but-valid traffic tests still matter for public release.

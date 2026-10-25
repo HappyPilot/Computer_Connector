@@ -23,3 +23,37 @@ if (source.startsWith(newImport)) {
 } else {
   throw new Error('Unexpected Desktop Commander schema module; patch not applied');
 }
+
+const serverFile = new URL('@wonderwhy-er/desktop-commander/dist/server.js', packageRoot);
+const serverSource = await readFile(serverFile, 'utf8');
+const marker = 'WCM_ARGUMENT_COMPLEXITY_GUARD_V1';
+const anchor = 'server.setRequestHandler(CallToolRequestSchema, async (request) => {\n    const args = request.params.arguments;';
+const preflight = `// WCM_ARGUMENT_COMPLEXITY_GUARD_V1: reject oversized nested tool arguments before Zod validates them.
+function wcmArgumentsWithinBudget(value, budget = { nodes: 0 }, depth = 0) {
+    if (++budget.nodes > 8192 || depth > 24) return false;
+    if (typeof value === 'string') return value.length <= 1000000;
+    if (Array.isArray(value)) {
+        if (value.length > 2048) return false;
+        for (const item of value) if (!wcmArgumentsWithinBudget(item, budget, depth + 1)) return false;
+        return true;
+    }
+    if (value && typeof value === 'object') {
+        const keys = Object.keys(value);
+        if (keys.length > 1024) return false;
+        for (const key of keys) if (!wcmArgumentsWithinBudget(value[key], budget, depth + 1)) return false;
+    }
+    return true;
+}
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const args = request.params.arguments;
+    if (!wcmArgumentsWithinBudget(args)) {
+        return { isError: true, content: [{ type: 'text', text: 'Arguments exceed safety limit' }] };
+    }`;
+if (serverSource.includes(marker)) {
+  console.log('Desktop Commander argument budget already applied.');
+} else if (serverSource.split(anchor).length === 2) {
+  await writeFile(serverFile, serverSource.replace(anchor, preflight));
+  console.log('Desktop Commander argument complexity budget applied.');
+} else {
+  throw new Error('Unexpected Desktop Commander request handler; budget patch not applied');
+}
