@@ -1,5 +1,12 @@
 # Agent Notes
 
+## Local verification and GitHub version-storage policy (2026-10-26)
+
+- **GitHub is a source/version archive and PR review surface, not a CI or deployment host.** GitHub Actions is disabled for this repository, and the automatic `.github/workflows/ci.yml` has been removed. Never recreate, reenable or route tests through hosted/self-hosted GitHub Actions without a new explicit owner instruction.
+- Verify trusted revisions locally in clean, isolated checkouts on Mac and RTX 5090 Linux using `npm ci`, `npm test`, `npm audit --omit=dev --audit-level=high`, and separately in `worker/` `npm ci --omit=dev`, `npm run test:stability`, and `npm audit --omit=dev --audit-level=high`. Record the exact commit SHA and host. For untrusted PRs, use a disposable sandbox without machine secrets or access to the home network.
+- See `docs/LOCAL_ONLY_CI_POLICY_2026-10-26.md`. The Commercial Cloud repository provides `node scripts/verify-local.mjs` for its own local verification. NAS .202 is optional internal coordination/backup only, and RTX 4050 must not be changed until explicitly requested.
+- Preserve the live-controller safety precautions below. In particular, do not run a test suite through the WCM instance that controls the same host or perform production cutovers as part of a verification job.
+
 ## MCP branding asset
 
 - The only published WCM icon path is `/rdc/icon.png` (served by the OAuth sidecar without credentials); its bytes come exclusively from `assets/wcm-icon.png`. No general file-serving routes or authentication exemptions for `/rdc/mcp`.
