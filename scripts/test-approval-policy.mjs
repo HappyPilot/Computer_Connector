@@ -50,6 +50,32 @@ assert.equal(warnings.length, 1);
 store.refresh();
 assert.equal(warnings.length, 1, 'unchanged malformed policy must not spam warnings');
 
+fs.writeFileSync(policyFile, JSON.stringify({ version: 1, mode: 'timed', revision: 9 }));
+const locked = new ApprovalPolicyStore({ root, modeLock: 'off' });
+refreshed = locked.refresh();
+assert.deepEqual(refreshed.policy, { version: 1, mode: 'off', revision: 9 });
+assert.equal(refreshed.source, 'file+lock');
+
+fs.writeFileSync(policyFile, JSON.stringify({ version: 1, mode: 'timed', revision: 10 }));
+refreshed = locked.refresh();
+assert.equal(refreshed.changed, true);
+assert.deepEqual(refreshed.policy, { version: 1, mode: 'off', revision: 10 });
+
+const priorModeLock = process.env.WC_APPROVAL_MODE_LOCK;
+process.env.WC_APPROVAL_MODE_LOCK = 'off';
+try {
+  const envLocked = new ApprovalPolicyStore({ root });
+  assert.equal(envLocked.refresh().policy.mode, 'off');
+} finally {
+  if (priorModeLock == null) delete process.env.WC_APPROVAL_MODE_LOCK;
+  else process.env.WC_APPROVAL_MODE_LOCK = priorModeLock;
+}
+
+assert.throws(
+  () => new ApprovalPolicyStore({ root, modeLock: 'invalid' }),
+  /WC_APPROVAL_MODE_LOCK/u,
+);
+
 assert.equal(validateApprovalDurationSeconds(), 21600);
 assert.equal(validateApprovalDurationSeconds(60), 60);
 assert.equal(validateApprovalDurationSeconds(604800), 604800);

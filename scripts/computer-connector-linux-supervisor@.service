@@ -1,0 +1,18 @@
+[Unit]
+Description=Computer Connector Linux restart supervisor (%i)
+After=default.target
+
+[Service]
+Type=simple
+# Install as a user unit. The environment file fixes the Router root and the
+# exact services this supervisor may restart; restart requests cannot override it.
+EnvironmentFile=%h/.config/computer-connector/supervisor-%i.env
+ExecStart=/usr/bin/node %h/computer-connector/scripts/wcm-supervisor-linux.mjs
+Restart=always
+RestartSec=3s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

@@ -45,6 +45,21 @@ function parsePolicyText(text) {
   };
 }
 
+function normalizeModeLock(value) {
+  if (value == null || String(value).trim() === '') return null;
+  const mode = String(value).trim().toLowerCase();
+  if (!['timed', 'off'].includes(mode)) {
+    throw new Error('WC_APPROVAL_MODE_LOCK must be timed, off, or unset.');
+  }
+  return mode;
+}
+
+function applyModeLock(policy, modeLock) {
+  const next = clonePolicy(policy);
+  if (modeLock) next.mode = modeLock;
+  return next;
+}
+
 export function validateApprovalDurationSeconds(value = DEFAULT_APPROVAL_DURATION_SECONDS) {
   const duration = value == null ? DEFAULT_APPROVAL_DURATION_SECONDS : Number(value);
   if (!Number.isInteger(duration)) {
@@ -67,42 +82,49 @@ export class ApprovalPolicyStore {
     root = process.cwd(),
     logger = null,
     file = null,
+    modeLock = process.env.WC_APPROVAL_MODE_LOCK,
   } = {}) {
     this.file = file || path.resolve(root, 'config', 'approval-policy.json');
     this.logger = logger;
+    this.modeLock = normalizeModeLock(modeLock);
     this.signature = null;
-    this.policy = clonePolicy(DEFAULT_POLICY);
+    this.policy = applyModeLock(DEFAULT_POLICY, this.modeLock);
     this.initialized = false;
   }
 
+  withLock(policy) {
+    return applyModeLock(policy, this.modeLock);
+  }
+
   readSource() {
+    const lockSuffix = '|lock:' + (this.modeLock || '-');
     try {
       const text = fs.readFileSync(this.file, 'utf8');
       return {
-        signature: 'file:' + hashText(text),
-        policy: parsePolicyText(text),
+        signature: 'file:' + hashText(text) + lockSuffix,
+        policy: this.withLock(parsePolicyText(text)),
         warning: null,
-        source: 'file',
+        source: this.modeLock ? 'file+lock' : 'file',
       };
     } catch (error) {
       if (error?.code === 'ENOENT') {
         return {
-          signature: 'missing',
-          policy: clonePolicy(DEFAULT_POLICY),
+          signature: 'missing' + lockSuffix,
+          policy: this.withLock(DEFAULT_POLICY),
           warning: null,
-          source: 'default',
+          source: this.modeLock ? 'default+lock' : 'default',
         };
       }
-      let signature = 'invalid:' + String(error?.message || error);
+      let signature = 'invalid:' + String(error?.message || error) + lockSuffix;
       try {
         const text = fs.readFileSync(this.file, 'utf8');
-        signature = 'invalid:' + hashText(text);
+        signature = 'invalid:' + hashText(text) + lockSuffix;
       } catch {}
       return {
         signature,
-        policy: clonePolicy(DEFAULT_POLICY),
+        policy: this.withLock(DEFAULT_POLICY),
         warning: String(error?.message || error),
-        source: 'fallback',
+        source: this.modeLock ? 'fallback+lock' : 'fallback',
       };
     }
   }
@@ -116,7 +138,7 @@ export class ApprovalPolicyStore {
 
     if (sourceChanged && next.warning) {
       this.logger?.error?.(
-        'Approval policy invalid; using fail-closed timed defaults: ' + next.warning,
+        'Approval policy invalid; using configured fallback policy: ' + next.warning,
       );
     }
 
